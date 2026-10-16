@@ -42,3 +42,7 @@ compile_commands.json
 resources/web/device_page/assets/
 resources/web/device_page/index.html
 
+# PrintFins Python test helpers; runtime evidence remains under /build/.
+/scripts/printfins/__pycache__/
+/tests/printfins/__pycache__/
+
