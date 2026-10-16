@@ -51,8 +51,8 @@ regeneration; saved 3MF projects contain ordinary printable geometry.
 | Dialog/transport tests | PASS: 4 Node tests using a small DOM/worker double; all editable defaults/ranges/choices, visibility, percent conversion, invalid/hidden input, explicit submit, host heights, worker result/errors and termination on close. These do not test native rendering or project mutation. |
 | Native build | PASS: changed MainFrame.cpp, GUI_App.cpp and PrintFinsPoC.cpp compiled with MSVC Release settings and linked into a separate runtime using the existing baseline libraries. This is an incremental validation build, not a fresh full CMake build. |
 | New runtime startup | PASS: isolated profile and tilted-box STL loaded; native import log confirms load_model_objects completed. Window capture confirms Prepare view. |
-| Local desktop UI operation | CONFIRMED by the maintainer: the new PrintFins UI opened and was operated successfully outside the restricted account. The current placement is retained. This confirmation does not specify generation, slicing, 3MF round trip, undo or individual safety cases. |
-| Complete new UI workflow | NOT YET CONFIRMED: new fin generation, joint slicing, native 3MF save/reopen, undo/redo, cancellation during computation, invalid selection and existing-fin rejection through the new UI still require the detailed desktop checks below. |
+| Local desktop workflow | CONFIRMED by the maintainer: the new GUI generated fins, sliced the model with them, saved a native 3MF project and reopened it successfully. The current placement is retained. This is manual desktop evidence, not a new automated pass. |
+| Additional stability coverage | A reproducible runner now prepares geometry, invalid-input, cancellation, duplicate-generation, selection, undo/redo and 3MF scenarios. The automated native GUI matrix remains blocked in the restricted account. See the [stability report and one-command desktop run](printfins-stability.md). |
 | Restricted-account attempt | Earlier attempt blocked by WebView2 GPU process exit 0xC0000022 and unavailable cursor positioning. This environment limitation does not supersede the maintainer's successful desktop UI check. |
 | Earlier original integration | Existing successful desktop generation, joint slicing, native 3MF save/reopen and placement evidence retained in the historical baseline report. Not repeated or counted as a pass for this changed UI host. |
 
@@ -81,8 +81,9 @@ git diff --check
 
 ## Desktop acceptance checklist
 
-Opening and operating the UI is confirmed by the maintainer. The checklist
-below retains the detailed acceptance cases; other steps are not claimed as
+Opening and operating the UI, fin generation, joint slicing and native 3MF
+save/reopen are confirmed by the maintainer. The checklist below retains the
+detailed acceptance cases; individual safety and undo cases are not claimed as
 passed without an explicit result. The automated checks and provenance checks
 were rerun before publication; native build/startup evidence was reused after
 checking that the compiled source hashes and local DLL hash still match.

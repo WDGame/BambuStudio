@@ -3,13 +3,7 @@ import assert from 'node:assert/strict';
 import { generate } from '../../resources/printfins/adapter.mjs';
 import { computeFins, ENGINE_DEFAULTS } from '../../resources/printfins/vendor/plugins/shared/engine/fins_entry.js';
 
-// Independent closed box fixture; this is input geometry, not a support algorithm.
-export function box(x0, x1, y0, y1, z0, z1) {
-    const v = [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],
-        [x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]];
-    return [[0,3,2,1],[4,5,6,7],[0,1,5,4],[2,3,7,6],[1,2,6,5],[0,4,7,3]]
-        .flatMap(([a,b,c,d]) => [...v[a],...v[b],...v[c],...v[a],...v[c],...v[d]]);
-}
+import { box } from './geometry-fixtures.mjs';
 const shelf = [...box(-20,20,-8,8,0,5), ...box(-20,20,-8,8,20,24), ...box(18,20,-8,8,5,20)];
 const options = { padStyle: 'off', tines: false };
 
