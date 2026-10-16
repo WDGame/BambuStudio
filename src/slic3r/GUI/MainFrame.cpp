@@ -1,4 +1,5 @@
 #include "MainFrame.hpp"
+#include "PrintFinsPoC.hpp"
 #include "GLToolbar.hpp"
 #include <wx/panel.h>
 #include <wx/notebook.h>
@@ -3268,6 +3269,12 @@ void MainFrame::init_menubar_as_editor()
                 }
                 m_plater->deselect_all(); },
             "", nullptr, [this](){return can_deselect(); }, this);
+        editMenu->AppendSeparator();
+        append_menu_item(editMenu, wxID_ANY, "PrintFins...",
+            _L("Generate PrintFins for the selected model"),
+            [this](wxCommandEvent &) { show_printfins_tool(*m_plater); },
+            "", nullptr, [this]() { return m_tabpanel->GetSelection() == TabPosition::tp3DEditor &&
+                m_plater->is_view3D_shown() && m_plater->can_do_ui_job() && m_plater->can_add_model(); }, this);
         //editMenu->AppendSeparator();
         //append_menu_check_item(editMenu, wxID_ANY, _L("Show Model Mesh(TODO)"),
         //    _L("Display triangles of models"), [this](wxCommandEvent& evt) {

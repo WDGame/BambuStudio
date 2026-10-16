@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'self'">
+<title>PrintFins</title>
+<link rel="stylesheet" href="tool.css">
+</head>
+<body>
+<p id="context"></p>
+<form id="settings"></form>
+<p id="error" role="alert"></p>
+<button type="submit" form="settings" id="generate" disabled>Generate fins</button>
+<script src="tool-bootstrap.js"></script>
+<script type="module" src="tool.mjs"></script>
+</body>
+</html>

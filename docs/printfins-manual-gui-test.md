@@ -1,5 +1,9 @@
 # Manual test of original PrintFins
 
+> Archived startup-PoC procedure for the original baseline. This branch no
+> longer runs that startup hook. Use the [regular UI test](printfins-ui-tool.md)
+> for the current host; retain the earlier artifacts as baseline evidence.
+
 Use `feature/printfins-original-clean`. Existing successful desktop generation,
 joint slicing, native saving and GUI reopening evidence is retained in the
 source worktree; no regeneration is needed to validate those records. See the
