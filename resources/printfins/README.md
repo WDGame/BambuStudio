@@ -13,8 +13,12 @@ support clearance is `gap`; the old material option is no longer supported.
 
 The modified-engine `starts.js`, `lower.js`, Lower Foot Gap and
 `alignLowerLayers` extensions are absent. Unknown old options are errors.
-The C++/WebView2 connection, coordinate conversion, separate model parts and
-native Bambu project export are reused unchanged.
+The **Edit > PrintFins...** tool uses the existing C++/WebView2 connection,
+coordinate conversion and separate printable model parts. Its settings are
+built directly from the original `options.json`, `optionVisible()` and
+`optionsFromDialog()`. The slicer's effective layer heights are supplied by C++.
+The startup PoC is no longer invoked. Saving and slicing use Bambu's normal UI.
 
 Verify with `python scripts/printfins/check-snapshot.py`.
-See `docs/printfins-engine-poc.md` for execution and limitations.
+See `docs/printfins-ui-tool.md` for use and the actual current test status.
+`docs/printfins-engine-poc.md` retains the earlier baseline's test evidence.

@@ -1,0 +1,11 @@
+:root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+body { margin: 12px; }
+fieldset { border: 1px solid #888; border-radius: 4px; margin: 12px 0; padding: 10px; }
+legend { font-weight: 600; }
+.option { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(80px, 160px) 48px; align-items: center; gap: 8px; margin: 12px 0; }
+.option[hidden] { display: none; }
+input, select { min-width: 0; width: 100%; box-sizing: border-box; }
+input[type=checkbox] { width: auto; justify-self: start; }
+output { text-align: right; }
+button { padding: 8px 16px; }
+#error { color: #d44; }

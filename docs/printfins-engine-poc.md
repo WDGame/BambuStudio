@@ -1,5 +1,11 @@
 # Original PrintFins integration
 
+> Historical baseline report for `feature/printfins-original-clean`, merged
+> into `integration` as `379b3eca`. The UI tool now replaces its startup entry
+> point; its native host has changed. These successful baseline tests are not
+> evidence that the new UI workflow passed. See the
+> [current tool and test status](printfins-ui-tool.md).
+
 This feature branch starts directly at `origin/integration`
 (`e87152e35ab69a36c79fefa069f7de901ca73ead`). It
 copies the reviewed integration from `feature/printfins-original` without
