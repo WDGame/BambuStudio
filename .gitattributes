@@ -1,0 +1,4 @@
+# Keep the upstream snapshot byte-identical to its Git blob hashes.
+resources/printfins/vendor/** -text
+# Upstream retains a blank final line; preserve it without relaxing other files.
+resources/printfins/vendor/web/prop/sweep.js whitespace=-blank-at-eof
