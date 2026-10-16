@@ -15,3 +15,16 @@ These rules apply to all agent work in this public BambuStudio + PrintFins repos
 6. **Community:** Keep changes understandable, reviewable, and appropriately documented. Respect upstream licenses and attribution.
 
 7. **Agent discipline:** Stay within the requested scope. Do not perform unrelated changes. Report modifications, tests, and limitations concisely.
+
+8. **Checkpoint discipline:** Never commit, push, create releases,
+or merge without explicit maintainer authorization. Before an
+approved checkpoint, verify the active branch, review all changes,
+inspect the staged file list, and run `git diff --cached --check`.
+Commit only the reviewed and authorized scope.
+
+9. **Staging, privacy, and provenance:** Stage files explicitly;
+never use `git add .` or `git add -A`. Exclude generated build
+artifacts, runtime logs, local profiles, credentials, personal
+filesystem paths, and unrelated files. Preserve third-party
+licenses, attribution, and reproducible source provenance.
+Verify vendored source snapshots against their manifest when changed.
