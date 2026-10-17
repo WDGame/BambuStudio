@@ -2,6 +2,7 @@
 #define slic3r_Utils_UndoRedo_hpp_
 
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,7 +53,7 @@ enum class SnapshotType : unsigned char {
 // which may be handy sometimes.
 struct SnapshotData
 {
-	SnapshotType        snapshot_type;
+	SnapshotType        snapshot_type { SnapshotType::Action };
 	PrinterTechnology 	printer_technology { ptUnknown };
 	// Bitmap of Flags (see the Flags enum).
 	unsigned int        flags { 0 };
@@ -100,6 +101,23 @@ inline bool snapshot_modifies_project(SnapshotType type)
 inline bool snapshot_modifies_project(const Snapshot &snapshot)
 {
 	return snapshot_modifies_project(snapshot.snapshot_data.snapshot_type) && (snapshot.name.empty() || snapshot.name.back() != '!');
+}
+
+// Match Plater's navigation boundaries: the initial project cannot be undone,
+// and a topmost placeholder/captured current state has no successor to redo.
+inline bool has_undo_action(const std::vector<Snapshot> &snapshots, size_t active_time)
+{
+    for (auto it = snapshots.begin(); it != snapshots.end() && it->timestamp < active_time; ++it)
+        if (it != snapshots.begin() && snapshot_modifies_project(*it)) return true;
+    return false;
+}
+
+inline bool has_redo_action(const std::vector<Snapshot> &snapshots, size_t active_time)
+{
+    auto it = std::lower_bound(snapshots.begin(), snapshots.end(), Snapshot(active_time));
+    for (; it != snapshots.end() && std::next(it) != snapshots.end(); ++it)
+        if (it != snapshots.begin() && snapshot_modifies_project(*it)) return true;
+    return false;
 }
 
 // Excerpt of Slic3r::GUI::Selection for serialization onto the Undo / Redo stack.

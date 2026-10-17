@@ -15,9 +15,10 @@ test('FDM host keeps original horizontal tines after an upstream resin call', ()
     assert.equal(actual.settings.tineDir, 'horizontal');
     assert.equal(ENGINE_DEFAULTS.gap, 0.2);
     assert.equal(ENGINE_DEFAULTS.mode, 'auto');
-    assert.ok(!FDM_SCHEMA.options.some(o => ['tineDir','pinDepth','mode'].includes(o.key)));
+    assert.ok(!FDM_SCHEMA.options.some(o => ['tineDir','pinDepth'].includes(o.key)));
     assert.throws(() => generate({ positions, options: { tineDir: 'vertical' } }), /FDM/);
-    for (const options of [{ mode: 'full' }, { mode: 'draw' }, { hybrid: true },
+    assert.throws(() => generate({ positions, options: { mode: 'draw' } }), /generation mode/);
+    for (const options of [{ hybrid: true },
         { curvedWalls: true }, { tallRibs: false }, { longWalls: true }])
         assert.throws(() => generate({ positions, options }), /unknown dialog option/);
 });

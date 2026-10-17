@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSettings } from '../../resources/printfins/settings.mjs';
-import { optionsFromDialog } from '../../resources/printfins/vendor/plugins/shared/engine/fins_entry.js';
+import { optionsFromSettings as optionsFromDialog } from '../../resources/printfins/schema.mjs';
 import { FDM_SCHEMA as OPTIONS_SCHEMA } from '../../resources/printfins/schema.mjs';
 import { generate } from '../../resources/printfins/adapter.mjs';
 
@@ -72,6 +72,20 @@ test('original dependencies follow tines/sway and hidden invalid values do not b
     assert.equal(control('sway.reach').parent.hidden, true);
 });
 
+test('host mode is independent of coverage and rejects unsupported choices', () => {
+    const { set, read, control } = setup();
+    assert.equal(read().mode, 'auto');
+    set('mode', 'full');
+    assert.equal(read().mode, 'full');
+    assert.equal(read().coverage, 0.5);
+    assert.equal(control('mode').parent.hidden, false);
+    set('coverage', 75);
+    assert.equal(read().mode, 'full');
+    assert.equal(read().coverage, 0.75);
+    set('mode', 'draw');
+    assert.throws(read, /generation mode/);
+});
+
 test('percent fields reach upstream in engine units and invalid visible values are rejected', () => {
     const { set, read } = setup();
     set('coverage', 75);
@@ -111,6 +125,12 @@ test('tool waits for an explicit submit, uses slicer heights, forwards results a
             0,0,0, 0,20,0, 0,0,20, 20,0,0, 0,0,20, 0,20,0];
         window.initPrintFins({ positions, options: { layerHeight: 0.16, firstLayerHeight: 0.2 } });
         assert.equal(ids.generate.disabled, false);
+        assert.equal(ids.generate.textContent, 'Generate PrintFins (Auto)');
+        const mode = ids.settings.elements.find(c => c.id === 'mode');
+        mode.value = 'full';
+        mode.emit('change');
+        assert.equal(ids.generate.textContent, 'Generate PrintFins (Full Coverage)');
+        assert.match(ids.context.textContent, /Full Coverage adds/);
         const gap = ids.settings.elements.find(c => c.id === 'gap');
         gap.value = '5';
         ids.settings.emit('submit');
@@ -123,6 +143,7 @@ test('tool waits for an explicit submit, uses slicer heights, forwards results a
         const worker = workers[0];
         assert.equal(worker.request.options.layerHeight, 0.16);
         assert.equal(worker.request.options.firstLayerHeight, 0.2);
+        assert.equal(worker.request.options.mode, 'full');
         assert.deepEqual(messages.at(-1), { action: 'computing' });
         const result = generate(worker.request);
         worker.onmessage({ data: { ok: true, ...result } });

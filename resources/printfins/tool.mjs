@@ -6,10 +6,19 @@ const error = document.getElementById('error');
 const readSettings = buildSettings(form, document);
 let request;
 let worker;
+const updateMode = () => {
+    const mode = request?.options.mode ?? [...form.elements].find(e => e.id === 'mode')?.value ?? 'auto';
+    button.textContent = `Generate PrintFins (${mode === 'full' ? 'Full Coverage' : 'Auto'})`;
+    if (request) document.getElementById('context').textContent =
+        `${mode === 'full' ? 'Full Coverage adds original fill walls under overhangs left by Auto.' : 'Auto places fins automatically.'} ` +
+        `Layer height: ${request.options.layerHeight} mm; first layer: ${request.options.firstLayerHeight} mm (from Bambu Studio).`;
+};
+form.addEventListener('change', updateMode);
+updateMode();
 window.initPrintFins = input => {
     if (request) return;
     request = input;
-    document.getElementById('context').textContent = `Layer height: ${input.options.layerHeight} mm; first layer: ${input.options.firstLayerHeight} mm (from Bambu Studio).`;
+    updateMode();
     button.disabled = false;
 };
 form.addEventListener('submit', event => {

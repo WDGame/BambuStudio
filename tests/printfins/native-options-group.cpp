@@ -10,10 +10,51 @@
 #include <boost/filesystem.hpp>
 #include <fstream>
 #include <limits>
+#include "slic3r/Utils/UndoRedo.hpp"
+#include <array>
+#include <cstring>
+#include <new>
 
 using namespace Slic3r;
 using namespace Slic3r::GUI;
 namespace PF = Slic3r::GUI::PrintFinsSettings;
+
+TEST_CASE("PrintFins undo history initializes captured state and respects project boundaries", "[PrintFins][UndoRedo]")
+{
+    using namespace Slic3r::UndoRedo;
+    // Reproduce default construction on non-zero stack memory deterministically.
+    alignas(SnapshotData) std::array<unsigned char, sizeof(SnapshotData)> memory;
+    memory.fill(0xa5);
+    auto *data = new (memory.data()) SnapshotData;
+    unsigned char type;
+    std::memcpy(&type, &data->snapshot_type, sizeof(type));
+    CHECK(type == static_cast<unsigned char>(SnapshotType::Action));
+    data->~SnapshotData();
+
+    const auto snap = [](const char *name, size_t time, SnapshotType type) {
+        SnapshotData data; data.snapshot_type = type;
+        return Snapshot(name, time, 1, data);
+    };
+    CHECK_FALSE(has_undo_action({}, 0));
+    CHECK_FALSE(has_redo_action({}, 0));
+    auto history = std::vector<Snapshot>{snap("Load Project", 0, SnapshotType::ProjectSeparator),
+        snap("@@@ Topmost @@@", 1, SnapshotType::ProjectSeparator)};
+    CHECK_FALSE(has_undo_action(history, 1));
+    CHECK_FALSE(has_redo_action(history, 1));
+    CHECK_FALSE(has_redo_action(history, 0));
+    history = {snap("Load Project", 0, SnapshotType::ProjectSeparator),
+        snap("Selection", 1, SnapshotType::Selection), snap("Generate PrintFins", 2, SnapshotType::Action),
+        snap("@@@ Topmost @@@", 3, SnapshotType::Action)};
+    CHECK(has_undo_action(history, 3));
+    CHECK_FALSE(has_redo_action(history, 3));
+    CHECK_FALSE(has_undo_action(history, 2));
+    CHECK(has_redo_action(history, 2));
+    CHECK_FALSE(has_undo_action(history, 1));
+    CHECK(has_redo_action(history, 1));
+    history[2] = snap("Selection", 2, SnapshotType::Selection);
+    CHECK_FALSE(has_redo_action(history, 1));
+    CHECK_FALSE(has_redo_action(history, 0));
+}
 
 namespace {
 PF::Json native_schema()
@@ -84,13 +125,14 @@ TEST_CASE("PrintFins per-value reset follows selected saved preset and preserves
     PresetCollection presets(Preset::TYPE_PRINT, Preset::print_options(),
         static_cast<const PrintRegionConfig &>(FullPrintConfig::defaults()));
     auto first = DynamicPrintConfig::full_print_config();
-    set_options(first, {{"threshold",51}, {"tines",true}, {"tineDensity",0.21}, {"gap",0.31},
+    set_options(first, {{"mode","full"}, {"threshold",51}, {"tines",true}, {"tineDensity",0.21}, {"gap",0.31},
         {"padStyle","light"}, {"sway.on",true}, {"sway.gripFrom",31}, {"sway.tineSpacing",7.5},
         {"sway.reach",0.22}, {"cutout","arch"}, {"coverage",0.61}, {"plateOnly",true}});
     presets.load_preset("", "PrintFins A", first);
     REQUIRE(presets.get_selected_preset().config.has("printfins_options"));
     auto current = presets.get_edited_preset().config;
     auto changed = PF::values(schema, current);
+    changed["mode"] = "auto";
     changed["gap"] = 0.23456789;
     changed["coverage"] = 0.77;
     changed.update(PF::Json{{"threshold",53}, {"tines",false}, {"tineDensity",0.37},
@@ -105,11 +147,14 @@ TEST_CASE("PrintFins per-value reset follows selected saved preset and preserves
     CHECK(reset.at("coverage") == 0.77);
     CHECK(reset.at("tineDensity") == 0.37); // hidden, not discarded
     CHECK(reset.at("tines") == false);
+    CHECK(reset.at("mode") == "auto");
+    CHECK(PF::reset(schema, current, presets.get_selected_preset().config, "mode").at("mode") == "full");
     CHECK(PF::values(schema, current).at("gap") == 0.23456789); // no implicit quantization
     CHECK(presets.get_selected_preset().config.opt_string("printfins_options") == saved_before);
     auto second = first;
     set_options(second, {{"gap",0.17}, {"coverage",0.42}});
     presets.load_preset("", "PrintFins B", second);
+    CHECK(PF::reset(schema, current, presets.get_selected_preset().config, "mode").at("mode") == "auto");
     CHECK(PF::reset(schema, current, presets.get_selected_preset().config, "gap").at("gap") == 0.17);
     CHECK(PF::serialize(schema, PF::values(schema, presets.get_selected_preset().config),
         presets.get_selected_preset().config) == second.opt_string("printfins_options"));
@@ -147,7 +192,8 @@ TEST_CASE("PrintFins native settings reject corrupt stored values", "[PrintFins]
     auto config = DynamicPrintConfig::full_print_config();
     for (const auto &bad : std::vector<PF::Json>{
         {{"gap",0.04}}, {{"gap",1.}}, {{"gap","0.2"}}, {{"sway.on","true"}},
-        {{"cutout","custom"}}, {{"unknown",1}}, PF::Json::array()}) {
+        {{"cutout","custom"}}, {{"mode","draw"}}, {{"mode",nullptr}}, {{"mode",false}},
+        {{"mode",1}}, {{"mode","Full Coverage"}}, {{"unknown",1}}, PF::Json::array()}) {
         set_options(config, bad);
         CHECK_THROWS(PF::values(schema, config));
     }
@@ -171,14 +217,14 @@ TEST_CASE("PrintFins native Bambu 3MF preserves global and object settings", "[P
     }
     config.set_deserialize_strict("support_type", "printfins");
     config.set_key_value("enable_support", new ConfigOptionBool(true));
-    set_options(config, {{"threshold",51}, {"tines",true}, {"tineDensity",0.37}, {"gap",0.23},
+    set_options(config, {{"mode","full"}, {"threshold",51}, {"tines",true}, {"tineDensity",0.37}, {"gap",0.23},
         {"padStyle","light"}, {"sway.on",true}, {"sway.gripFrom",31}, {"sway.tineSpacing",6.5},
         {"sway.reach",0.22}, {"cutout","arch"}, {"coverage",0.77}, {"plateOnly",true}});
     Model model;
     auto *object = model.add_object("PrintFins settings fixture", "", make_cube(20,20,20));
     object->add_instance();
-    object->config.set_key_value("printfins_options", new ConfigOptionString(R"({"gap":0.27,"tines":false,"tineDensity":0.37})"));
-    object->volumes.front()->config.set_key_value("printfins_options", new ConfigOptionString(R"({"gap":0.19,"cutout":"arch"})"));
+    object->config.set_key_value("printfins_options", new ConfigOptionString(R"({"mode":"auto","gap":0.27,"tines":false,"tineDensity":0.37})"));
+    object->volumes.front()->config.set_key_value("printfins_options", new ConfigOptionString(R"({"mode":"full","gap":0.19,"cutout":"arch"})"));
     const auto path = (boost::filesystem::current_path() / boost::filesystem::unique_path("printfins-settings-%%%%-%%%%.3mf")).string();
     INFO(path);
     REQUIRE_FALSE(boost::filesystem::exists(path));
@@ -214,6 +260,33 @@ TEST_CASE("PrintFins native Bambu 3MF preserves global and object settings", "[P
     CHECK(reopened.objects.front()->config.get().opt_string("printfins_options") == object->config.get().opt_string("printfins_options"));
     CHECK(reopened.objects.front()->volumes.front()->config.get().opt_string("printfins_options") == object->volumes.front()->config.get().opt_string("printfins_options"));
     CHECK(reopened.mesh().facets_count() == model.mesh().facets_count());
+    const auto schema = native_schema();
+    CHECK(PF::values(schema, restored).at("mode") == "full");
+    auto effective = restored;
+    effective.apply(reopened.objects.front()->config.get());
+    CHECK(PF::values(schema, effective).at("mode") == "auto");
+    effective.apply(reopened.objects.front()->volumes.front()->config.get());
+    CHECK(PF::values(schema, effective).at("mode") == "full");
+}
+
+TEST_CASE("PrintFins mode defaults to Auto for legacy presets and object overrides", "[PrintFins][Settings][Preset]")
+{
+    const auto schema = native_schema();
+    auto legacy = DynamicPrintConfig::full_print_config();
+    CHECK(PF::values(schema, legacy).at("mode") == "auto");
+    CHECK(PF::serialize(schema, PF::values(schema, legacy), legacy) == "{}");
+    auto global = legacy;
+    set_options(global, {{"mode","full"}, {"coverage",0.75}});
+    CHECK(PF::values(schema, global).at("mode") == "full");
+    DynamicPrintConfig object;
+    auto effective = global;
+    effective.apply(object);
+    CHECK(PF::values(schema, effective).at("mode") == "full");
+    set_options(object, {{"gap",0.27}}); // Existing aggregate-option override semantics.
+    effective.apply(object);
+    CHECK(PF::values(schema, effective).at("mode") == "auto");
+    CHECK(PF::values(schema, effective).at("gap") == 0.27);
+    CHECK(PF::values(schema, global).at("mode") == "full");
 }
 
 namespace {

@@ -22,6 +22,13 @@ controls; this integration retains horizontal FDM tines. The adapter rejects
 vertical resin generation. The slicer's effective layer heights are supplied by C++.
 The startup PoC is no longer invoked. Saving and slicing use Bambu's normal UI.
 
+**Generation mode** selects original `computeFins` Auto (default) or Full
+Coverage. This host setting is removed before `optionsFromDialog()` validation
+and passed separately to `computeFins`; no original file is modified. It is saved
+with the other native preset/project settings. Wide-face coverage remains the
+separate density parameter; Full Coverage does not guarantee every overhang can
+be supported. See `docs/printfins-full-coverage.md` for tests and desktop checks.
+
 Verify with `python scripts/printfins/check-snapshot.py`.
 Use `--git-source <official-local-clone>` to compare exact pinned Git blobs,
 independently of checkout newline conversion. See

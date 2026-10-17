@@ -1047,12 +1047,7 @@ bool StackImpl::has_undo_snapshot() const
 		return false;
 #endif
 	// BBS: undo-redo until modify record
-	auto it = std::lower_bound(m_snapshots.begin(), m_snapshots.end(), Snapshot(m_active_snapshot_time));
-	for (auto it2 = m_snapshots.begin(); it2 != it; ++it2) {
-		if (snapshot_modifies_project(*it2))
-			return true;
-	}
-	return false;
+	return has_undo_action(m_snapshots, m_active_snapshot_time);
 }
 
 bool StackImpl::has_undo_snapshot(size_t time_to_load) const
@@ -1068,12 +1063,7 @@ bool StackImpl::has_redo_snapshot() const
 #endif
 
 	// BBS: undo-redo until modify record
-	auto it = std::lower_bound(m_snapshots.begin(), m_snapshots.end(), Snapshot(m_active_snapshot_time));
-	for (it; it != m_snapshots.end(); ++it) {
-		if (snapshot_modifies_project(*it))
-			return true;
-	}
-	return false;
+	return has_redo_action(m_snapshots, m_active_snapshot_time);
 }
 
 bool StackImpl::undo(Slic3r::Model &model, const Slic3r::GUI::Selection &selection, Slic3r::GUI::GLGizmosManager &gizmos, Slic3r::GUI::PartPlateList& plate_list, const SnapshotData &snapshot_data, size_t time_to_load)
