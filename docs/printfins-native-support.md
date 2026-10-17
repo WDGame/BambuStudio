@@ -1,5 +1,9 @@
 # Native PrintFins support integration — staged implementation
 
+For the isolated engine update to `2cf5110efbdc`, see the
+[upstream update report](printfins-upstream-20261017.md). The original checkpoint
+and implementation history below retain their original pin and test scope.
+
 ## Local development checkpoint (2026-10-17)
 
 The maintainer authorized a local commit on `feature/printfins-native-support`;

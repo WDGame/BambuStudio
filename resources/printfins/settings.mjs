@@ -1,4 +1,5 @@
-import { OPTIONS_SCHEMA, optionVisible, optionsFromDialog } from './vendor/plugins/shared/engine/fins_entry.js';
+import { optionVisible, optionsFromDialog } from './vendor/plugins/shared/engine/fins_entry.js';
+import { FDM_SCHEMA as OPTIONS_SCHEMA } from './schema.mjs';
 
 // Only host presentation and unit conversion; defaults, validation and visibility
 // remain owned by the original schema and its entry point.

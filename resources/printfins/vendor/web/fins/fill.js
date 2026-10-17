@@ -27,6 +27,11 @@
  * its densest red (FILL.local): an upright figure's group is a hem, both arms and
  * the hands at one height, and every line across all that met the first wall.
  *
+ * ROWS FIRST (opts.longWalls, the Long walls box, on unless false): before any of
+ * that, rows of long walls along the model's length (fins/rows.js, fins/field.js), the
+ * way a wall drawn by hand runs -- the patch lines here then take what the rows leave.
+ * Not with the slider under FILL.sparseBelow (one wall per group is its own promise).
+ *
  * THE SLIDER. Wide-face coverage (opts.coverage) sets how much gets added, so
  * there is no wall-count field: below FILL.sparseBelow every group gets at most
  * ONE wall ("something" under every red patch); from there up, walls are added
@@ -45,6 +50,8 @@ import { drawnLine, drawnWall, DRAW_MIN_LEN } from '../draw.js';
 import { BRACE, braceWall, footFor, PART_BAND, PROP, surfaceHitsAt, TIE, tieWalls } from '../prop.js';
 import { classify, reachOf, PLATE_Z, MUST } from './coverage.js';
 import { seatedPartTris } from './seating.js';
+import { headingField } from './field.js';
+import { rowWalls } from './rows.js';
 
 export const FILL = {
   sample: 1.0,       // mm: leftover red is merged into points this far apart
@@ -78,14 +85,20 @@ export function fillReach(coverage) {
 /**
  * Leftover MUST red as points [x, y, z, area], merged into FILL.sample cells. A
  * big CAD triangle is subdivided first (a cube face is two triangles: its
- * centroid alone would call the whole face held or bare).
+ * centroid alone would call the whole face held or bare). `regions` (a Set, or
+ * null for all) keeps only those regions' faces.
  */
-function leftoverPoints(topo, result, rot, near, cls) {
+function leftoverPoints(topo, result, rot, near, cls, regions = null) {
   const { pos } = topo, off = result.offset;
   const seat = (o) => [rot[0] * pos[o] + rot[3] * pos[o + 1] + rot[6] * pos[o + 2] + off.x,
     rot[1] * pos[o] + rot[4] * pos[o + 1] + rot[7] * pos[o + 2] + off.y,
     rot[2] * pos[o] + rot[5] * pos[o + 1] + rot[8] * pos[o + 2] + off.z];
   const s = FILL.sample, cells = new Map();
+  let only = null;
+  if (regions) {
+    only = new Uint8Array(topo.nFaces);
+    for (const ri of regions) for (const f of result.regions[ri]?.faces ?? []) only[f] = 1;
+  }
   const put = (x, y, z, a) => {
     if (z < PLATE_Z || near(x, y, z)) return;
     const k = `${Math.floor(x / s)},${Math.floor(y / s)},${Math.floor(z / s)}`;
@@ -93,7 +106,7 @@ function leftoverPoints(topo, result, rot, near, cls) {
     if (c) { c[0] += x * a; c[1] += y * a; c[2] += z * a; c[3] += a; } else cells.set(k, [x * a, y * a, z * a, a]);
   };
   for (let f = 0; f < topo.nFaces; f++) {
-    if (!result.over[f] || cls[f] !== MUST) continue;
+    if (!result.over[f] || cls[f] !== MUST || (only && !only[f])) continue;
     const A = seat(f * 9), B = seat(f * 9 + 3), C = seat(f * 9 + 6);
     const edge = Math.max(Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]),
       Math.hypot(C[0] - B[0], C[1] - B[1], C[2] - B[2]), Math.hypot(A[0] - C[0], A[1] - C[1], A[2] - C[2]));
@@ -402,13 +415,18 @@ function boxesOf(a, b, c, fn, depth = 0) {
   boxesOf(m, b, c, fn, depth + 1);
 }
 
-/** Every support triangle's box, gridded in plan, so "does this new wall touch one" is cheap. */
+/** Every support triangle's box, gridded in plan AND height (a tall wall's boxes stack
+ *  ~25 to a plan cell, and Auto's tines more: a plan-only grid made each check walk
+ *  them all, ~0.3 s a wall on a 250k-face bust), so "does this new wall touch one" is cheap. */
 function boxGrid() {
-  const C = 5, grid = new Map();
-  const key = (i, j) => i * 100003 + j;
+  const C = 3, CZ = 3, grid = new Map();
+  // 13 bits a cell index (+-12 m at 3 mm); a collision past that only adds candidates
+  const key = (i, j, k) => ((i + 4096) * 8192 + (j + 4096)) * 8192 + (k + 4096);
   const cellsOf = (b, pad, fn) => {
     for (let i = Math.floor((b[0] - pad) / C); i <= Math.floor((b[3] + pad) / C); i++) {
-      for (let j = Math.floor((b[1] - pad) / C); j <= Math.floor((b[4] + pad) / C); j++) fn(key(i, j));
+      for (let j = Math.floor((b[1] - pad) / C); j <= Math.floor((b[4] + pad) / C); j++) {
+        for (let k = Math.floor((b[2] - pad) / CZ); k <= Math.floor((b[5] + pad) / CZ); k++) fn(key(i, j, k));
+      }
     }
   };
   return {
@@ -546,8 +564,30 @@ function tieFill(props, floors, triangles, tris, others) {
  * The fill pass. `built` is Auto's result (fins with their contact lines, and
  * every support triangle in `triangles`). Returns the added walls:
  * { triangles, props, tines, unserved: { area, pts }, stats }.
+ *
+ * With Long walls (opts.longWalls, on unless false) it is built twice, with the rows
+ * and without, and the rows are kept only if they leave no more red bare than the
+ * patch lines alone: rows laid first can take the room a patch line needed (a wedge
+ * at X40: 17 -> 47 mm2 bare), and every red face must get something. A tie keeps
+ * the rows -- the walls a hand would draw. `stats.rowsLost` (mm2 more bare) says
+ * when they lost.
  */
 export function fillCoverage(topo, result, rot, opts, built) {
+  // (no rows under the sparse slider: one wall per group is its own promise)
+  if (opts.longWalls === false || (opts.coverage ?? 0.5) < FILL.sparseBelow) {
+    return fillOnce(topo, result, rot, { ...opts, longWalls: false }, built);
+  }
+  const plain = fillOnce(topo, result, rot, { ...opts, longWalls: false }, built);
+  if (!(plain.unserved.area > 0)) return plain;    // nothing left for rows to win
+  const rows = fillOnce(topo, result, rot, opts, built);
+  if (!rows.stats.rows || rows.unserved.area > plain.unserved.area + 1e-6) {
+    plain.stats.rowsLost = rows.stats.rows ? rows.unserved.area - plain.unserved.area : 0;
+    return plain;
+  }
+  return rows;
+}
+
+function fillOnce(topo, result, rot, opts, built) {
   const coverage = Math.max(0, Math.min(1, opts.coverage ?? 0.5));
   const R = fillReach(coverage);
   const oneEach = coverage < FILL.sparseBelow;
@@ -555,12 +595,14 @@ export function fillCoverage(topo, result, rot, opts, built) {
   for (const w of built.fins ?? []) for (const p of w.line ?? []) tops.push(p);
   const near = reachOf(tops, R);
   const cls = classify(topo, result, rot);
-  const pts = leftoverPoints(topo, result, rot, near, cls);
+  const pts = leftoverPoints(topo, result, rot, near, cls, opts.fillRegions ?? null);
   const triangles = [], props = [];
   const stats = { walls: 0, tries: 0, checks: 0, capped: false, refused: {}, startArea: pts.reduce((s, p) => s + p[3], 0) };
   if (!pts.length) return { triangles, props, tines: 0, unserved: { area: 0, pts: [] }, stats };
 
   const tris = seatedPartTris(topo, rot, result.offset);
+  // the model's length (opts.longWalls, on unless false: the Long walls box), for the rows
+  const field = opts.longWalls !== false ? headingField(topo, result, rot) : null;
   const others = boxGrid();
   others.add(built.triangles ?? []);
   // Plate only (#218): no wall on the part -- never the retry that stands one there,
@@ -574,6 +616,20 @@ export function fillCoverage(topo, result, rot, opts, built) {
   const bare = (p) => !dead.has(p) && !near(p[0], p[1], p[2]);
   const full = () => stats.walls >= FILL.maxWalls || stats.tries >= FILL.maxTries || stats.checks >= FILL.maxChecks;
   const CAP = 'cap';               // wallFor stopped on a cap: give up on nothing
+  // a built wall goes in: its triangles, its tops into the reach set, its record
+  const keep = (r, joined = false) => {
+    const at = triangles.length;
+    for (const t of r.tris) triangles.push(t);
+    others.add(r.tris, { fill: true, k: props.length });
+    for (const p of r.top) near.add(p);
+    props.push({ line: r.top, triRanges: [[at, triangles.length]], height: r.height, span: r.length,
+                 tines: r.tines ?? 0, partAttached: !!r.partAttached, squat: !!r.squat, fill: true,
+                 joined: joined || undefined });
+    if (joined) stats.joined = (stats.joined ?? 0) + 1;
+    floors.push(r.floors ?? null);
+    tines += r.tines ?? 0;
+    stats.walls++;
+  };
 
   // One wall for group `g` of `live`: the first candidate (bridged lines first, then
   // the same directions without crossing gaps) that builds, keeps off every support
@@ -633,17 +689,7 @@ export function fillCoverage(topo, result, rot, opts, built) {
         let gain = 0;
         for (const i of g) if (reach(live[i][0], live[i][1], live[i][2])) gain += live[i][3];
         if (gain < FILL.minGain) { stats.refused['holds no new red'] = (stats.refused['holds no new red'] ?? 0) + 1; continue; }
-        const at = triangles.length;
-        for (const t of r.tris) triangles.push(t);
-        others.add(r.tris, { fill: true, k: props.length });
-        for (const p of r.top) near.add(p);
-        props.push({ line: r.top, triRanges: [[at, triangles.length]], height: r.height, span: r.length,
-                     tines: r.tines ?? 0, partAttached: !!r.partAttached, squat: !!r.squat, fill: true,
-                     joined: joined || undefined });
-        if (joined) stats.joined = (stats.joined ?? 0) + 1;
-        floors.push(r.floors ?? null);
-        tines += r.tines ?? 0;
-        stats.walls++;
+        keep(r, joined);
         return true;
       }
       return null;
@@ -690,6 +736,18 @@ export function fillCoverage(topo, result, rot, opts, built) {
       }
     }
   } else {
+    // ROWS first (opts.longWalls): long walls along the model's length (fins/rows.js);
+    // the patch lines below take what they leave
+    if (field) {
+      // one heading for every row: the length at the bare red's centroid (none: x)
+      let w = 0, x = 0, y = 0;
+      for (const p of pts) { w += p[3]; x += p[0] * p[3]; y += p[1] * p[3]; }
+      const r = rowWalls({ pts, heading: field(x / w, y / w) ?? 0, R, tris, drawOpts, minGain: FILL.minGain,
+        fits: (t) => !others.hits(t.tris, PROP.sideClear, true), keep: (t) => keep(t),
+        room: () => stats.walls < FILL.maxWalls, nFaces: topo.nFaces });
+      stats.rows = r.walls;
+      stats.rowBuilds = r.builds;
+    }
     // until every point is within reach: a wall under the heaviest bare group, regroup, again
     while (!full()) {
       const live = pts.filter(bare);

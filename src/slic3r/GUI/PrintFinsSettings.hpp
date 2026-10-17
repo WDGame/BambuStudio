@@ -13,6 +13,10 @@ using Json = nlohmann::json;
 // Host presentation only. Never change the verified upstream schema on disk.
 inline Json native_schema(Json schema)
 {
+    auto &options = schema.at("options");
+    options.erase(std::remove_if(options.begin(), options.end(), [](const auto &spec) {
+        return spec.at("key") == "tineDir" || spec.at("key") == "pinDepth";
+    }), options.end()); // Resin-only controls are not part of this FDM host.
     for (auto &spec : schema.at("options")) {
         const auto key = spec.at("key").get<std::string>();
         if (key == "threshold" || key == "sway.gripFrom") spec["step"] = 1.;

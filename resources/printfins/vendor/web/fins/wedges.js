@@ -259,6 +259,71 @@ export function perpColumns(p, lo, hi, pitch) {
 }
 
 /**
+ * The longest run of contact stations whose blade column stands clear of the part.
+ *
+ * A wedge drops straight from the face it holds to the bed, so any of the part
+ * under that face is in its way: a channel stood at 45deg (GH #254) got a wedge under
+ * its upper plate that ran straight through the lower one -- fused into the part,
+ * impossible to break away. A station is clear when nothing of the part faces UP
+ * below the blade's top, under the blade and the gap past its ends: the face the
+ * wedge holds faces down, so an up-facing surface under it is other material. Not
+ * past the blade's sides, and not between the top and the contact: there a steep
+ * side wall beside the blade (ssdMounts X45), a slot the blade stands in (bridge
+ * Y45) or the face meeting the contact's end (needle X45) reads as up-facing and
+ * dropped wedges standing clear of the part.
+ *
+ * A clearly down-facing surface more than DIG under the top is in the way too: the
+ * held patch is a plane fit, and past the real face (bridge Y45) the blade's top
+ * rides air over more of the part. Shallower, or near-vertical, is the held face
+ * itself curving past the blade's edges (cylinder, tube), as a wedge always did.
+ * The part's own bottom on the bed is under nothing, so it never counts.
+ */
+function clearRun(contact, uDir, half, partTris) {
+  const n = contact.length, e = half - 0.05, STEP = 0.25, DIG = 1.0;
+  // Across: rays STEP apart, so a rib under a wide blade (Wall lines, nozzle.js) can't
+  // pass between them. Along: each station owns the run halfway to its neighbours
+  // (the gap past an end), rays STEP apart, so a one-perimeter wall can't sit
+  // between stations 1.5 mm apart up the face. The top follows the run between them.
+  const nS = Math.max(2, Math.ceil((2 * e) / STEP));
+  const across = Array.from({ length: nS + 1 }, (_, k) => -e + (2 * e * k) / nS);
+  const blocked = (w, to, reach) => {
+    const d = Math.hypot(to[0] - w[0], to[1] - w[1]);
+    const nA = d < 1e-9 ? 0 : Math.max(1, Math.ceil(reach / STEP));   // a vertical step: the station alone
+    for (let k = 0; k <= nA; k++) {
+      const f = nA ? (reach * k) / nA / d : 0;
+      const x0 = w[0] + (to[0] - w[0]) * f, y0 = w[1] + (to[1] - w[1]) * f;
+      const zTop = w[2] + (to[2] - w[2]) * f - PERP.gap;
+      for (const s of across) {
+        for (const [z, nz] of surfaceHitsAt(partTris, x0 + uDir.x * s, y0 + uDir.y * s)) {
+          if (nz > 0 ? z < zTop : nz < -0.3 && z < zTop - DIG) return true;
+        }
+      }
+    }
+    return false;
+  };
+  // past an end: the gap outward, along the run's line from the inner neighbour
+  const beyond = (w, inner) => [2 * w[0] - inner[0], 2 * w[1] - inner[1], 2 * w[2] - inner[2]];
+  const halfway = (w, q) => Math.hypot(q[0] - w[0], q[1] - w[1]) / 2;
+  const clear = contact.map((w, i) => {
+    const back = i > 0 ? !blocked(w, contact[i - 1], halfway(w, contact[i - 1]))
+                       : !blocked(w, beyond(w, contact[1]), PERP.gap);
+    const fwd = i < n - 1 ? !blocked(w, contact[i + 1], halfway(w, contact[i + 1]))
+                          : !blocked(w, beyond(w, contact[n - 2]), PERP.gap);
+    return back && fwd;
+  });
+  // The longest clear run that still stands minH tall: a long low stretch under a
+  // plate that cuts the column midway mustn't win over a shorter one that holds.
+  let best = [0, -1];
+  for (let i = 0, s = -1; i <= n; i++) {
+    if (i < n && clear[i]) { if (s < 0) s = i; continue; }
+    if (s >= 0 && i - 1 - s > best[1] - best[0]
+        && Math.max(...contact.slice(s, i).map((w) => w[2])) - PERP.gap >= PERP.minH) best = [s, i - 1];
+    s = -1;
+  }
+  return contact.slice(best[0], best[1] + 1);
+}
+
+/**
  * Tile perpendicular wedges across one down-facing patch. Returns
  * { triangles, tines, count }.
  */
@@ -275,7 +340,7 @@ export function buildPerpFins(p, topo, rot, offset, opts = {}) {
 
   for (const uc of perpColumns(p, lo, hi, opts.pitch ?? PERP.pitch)) {
     // contact profile up the face at this u (stop at the first hole after starting)
-    const contact = [];
+    let contact = [];
     const nT = Math.max(2, Math.ceil((p.t1 - p.t0) / PERP.tStep));
     for (let i = 0; i <= nT; i++) {
       const t = p.t0 + ((p.t1 - p.t0) * i) / nT;
@@ -297,6 +362,9 @@ export function buildPerpFins(p, topo, rot, offset, opts = {}) {
       }
       if (w[2] > 0.3) contact.push(w);
     }
+    if (contact.length < 2) continue;
+    partTris ??= seatedPartTris(topo, rot, offset);
+    contact = clearRun(contact, uDir, half, partTris);
     if (contact.length < 2) continue;
     const top = contact.map((w) => [w[0], w[1], w[2] - PERP.gap]);
     if (Math.max(...top.map((q) => q[2])) < PERP.minH) continue;
