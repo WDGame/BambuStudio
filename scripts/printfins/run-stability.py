@@ -420,7 +420,8 @@ class Report:
 
 def automated_checks(report):
     directory=report.directory/'automated'; directory.mkdir()
-    tests=['tests/printfins/adapter.test.mjs','tests/printfins/settings.test.mjs','tests/printfins/stability-engine.test.mjs']
+    tests=['tests/printfins/adapter.test.mjs','tests/printfins/settings.test.mjs','tests/printfins/stability-engine.test.mjs',
+           'tests/printfins/native-transport.test.mjs']
     with (directory/'node.log').open('w') as log:
         result=subprocess.run(['node','--test','--test-reporter=junit','--test-reporter-destination='+str(directory/'node.xml'),*tests],
             cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,timeout=120,**HIDDEN)
@@ -431,7 +432,7 @@ def automated_checks(report):
             error=case.find('failure')
             if error is None: error=case.find('error')
             name=case.get('name')
-            kind='simulated_DOM_worker' if name.startswith(('dialog controls','original dependencies','percent fields','tool waits')) else 'engine_adapter'
+            kind='simulated_DOM_worker' if name.startswith(('dialog controls','original dependencies','percent fields','tool waits','native settings')) else 'engine_adapter'
             report.record('node/'+name,kind,'FAIL' if error is not None else 'NOT_RUN' if case.find('skipped') is not None else 'PASS',
                 error='' if error is None else ''.join(error.itertext()),logs='automated/node.xml')
     else: report.record('node/test-process','engine_adapter','FAIL',error='No JUnit report; see automated/node.log')

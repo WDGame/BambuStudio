@@ -10,6 +10,29 @@
 
 using namespace Slic3r;
 
+TEST_CASE("PrintFins preserves existing support enums and roundtrips native settings", "[Config][PrintFins]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    REQUIRE(config.opt_enum<SupportType>("support_type") == stNormalAuto);
+    REQUIRE(config.opt_string("printfins_options") == "{}");
+    for (const auto &value : {"normal(auto)", "tree(auto)", "normal(manual)", "tree(manual)", "printfins"}) {
+        config.set_deserialize_strict("support_type", value);
+        REQUIRE(config.option("support_type")->serialize() == value);
+    }
+    REQUIRE(config.opt_enum<SupportType>("support_type") == stPrintFins);
+    REQUIRE_FALSE(is_tree(stPrintFins));
+    const std::string values = R"({"gap":0.3,"coverage":0.75,"sway.on":true})";
+    config.set_key_value("printfins_options", new ConfigOptionString(values));
+    DynamicPrintConfig reopened = DynamicPrintConfig::full_print_config();
+    reopened.set_deserialize_strict("support_type", config.option("support_type")->serialize());
+    reopened.set_deserialize_strict("printfins_options", config.option("printfins_options")->serialize());
+    REQUIRE(reopened.opt_enum<SupportType>("support_type") == stPrintFins);
+    REQUIRE(reopened.opt_string("printfins_options") == values);
+    PrintObjectConfig object_config;
+    object_config.apply(reopened, true);
+    REQUIRE(object_config.printfins_options.value == values);
+}
+
 SCENARIO("Generic config validation performs as expected.", "[Config]") {
     GIVEN("A config generated from default options") {
         Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
@@ -36,18 +59,19 @@ SCENARIO("Generic config validation performs as expected.", "[Config]") {
 }
 
 SCENARIO("Config accessor functions perform as expected.", "[Config]") {
+    // Missing/renamed options must fail this test, never dereference a null opt().
     GIVEN("A config generated from default options") {
         Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
         WHEN("A boolean option is set to a boolean value") {
             REQUIRE_NOTHROW(config.set("gcode_comments", true));
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionBool>("gcode_comments")->getBool() == true);
+                REQUIRE(config.option_throw<ConfigOptionBool>("gcode_comments")->getBool() == true);
             }
         }
         WHEN("A boolean option is set to a string value representing a 0 or 1") {
             CHECK_NOTHROW(config.set_deserialize_strict("gcode_comments", "1"));
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionBool>("gcode_comments")->getBool() == true);
+                REQUIRE(config.option_throw<ConfigOptionBool>("gcode_comments")->getBool() == true);
             }
         }
         WHEN("A boolean option is set to a string value representing something other than 0 or 1") {
@@ -55,7 +79,7 @@ SCENARIO("Config accessor functions perform as expected.", "[Config]") {
                 REQUIRE_THROWS_AS(config.set("gcode_comments", "Z"), BadOptionTypeException);
             }
             AND_THEN("Value is unchanged.") {
-                REQUIRE(config.opt<ConfigOptionBool>("gcode_comments")->getBool() == false);
+                REQUIRE(config.option_throw<ConfigOptionBool>("gcode_comments")->getBool() == false);
             }
         }
         WHEN("A boolean option is set to an int value") {
@@ -66,7 +90,7 @@ SCENARIO("Config accessor functions perform as expected.", "[Config]") {
         WHEN("A numeric option is set from serialized string") {
             config.set_deserialize_strict("bed_temperature", "100");
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionInts>("bed_temperature")->get_at(0) == 100);
+                REQUIRE(config.option_throw<ConfigOptionInts>("bed_temperature")->get_at(0) == 100);
             }
         }
 #if 0
@@ -74,20 +98,20 @@ SCENARIO("Config accessor functions perform as expected.", "[Config]") {
 		WHEN("An integer-based option is set through the integer interface") {
             config.set("bed_temperature", 100);
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionInts>("bed_temperature")->get_at(0) == 100);
+                REQUIRE(config.option_throw<ConfigOptionInts>("bed_temperature")->get_at(0) == 100);
             }
         }
 #endif
         WHEN("An floating-point option is set through the integer interface") {
             config.set("perimeter_speed", 10);
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionFloat>("perimeter_speed")->getFloat() == 10.0);
+                REQUIRE(config.option_throw<ConfigOptionFloat>("perimeter_speed")->getFloat() == 10.0);
             }
         }
         WHEN("A floating-point option is set through the double interface") {
             config.set("perimeter_speed", 5.5);
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionFloat>("perimeter_speed")->getFloat() == 5.5);
+                REQUIRE(config.option_throw<ConfigOptionFloat>("perimeter_speed")->getFloat() == 5.5);
             }
         }
         WHEN("An integer-based option is set through the double interface") {
@@ -100,31 +124,31 @@ SCENARIO("Config accessor functions perform as expected.", "[Config]") {
                 REQUIRE_THROWS_AS(config.set_deserialize_strict("perimeter_speed", "zzzz"), BadOptionValueException);
             }
             THEN("The value does not change.") {
-                REQUIRE(config.opt<ConfigOptionFloat>("perimeter_speed")->getFloat() == 60.0);
+                REQUIRE(config.option_throw<ConfigOptionFloat>("perimeter_speed")->getFloat() == 60.0);
             }
         }
         WHEN("A string option is set through the string interface") {
             config.set("end_gcode", "100");
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionString>("end_gcode")->value == "100");
+                REQUIRE(config.option_throw<ConfigOptionString>("end_gcode")->value == "100");
             }
         }
         WHEN("A string option is set through the integer interface") {
             config.set("end_gcode", 100);
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionString>("end_gcode")->value == "100");
+                REQUIRE(config.option_throw<ConfigOptionString>("end_gcode")->value == "100");
             }
         }
         WHEN("A string option is set through the double interface") {
             config.set("end_gcode", 100.5);
             THEN("The underlying value is set correctly.") {
-                REQUIRE(config.opt<ConfigOptionString>("end_gcode")->value == float_to_string_decimal_point(100.5));
+                REQUIRE(config.option_throw<ConfigOptionString>("end_gcode")->value == float_to_string_decimal_point(100.5));
             }
         }
         WHEN("A float or percent is set as a percent through the string interface.") {
             config.set_deserialize_strict("first_layer_extrusion_width", "100%");
             THEN("Value and percent flag are 100/true") {
-                auto tmp = config.opt<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
+                auto tmp = config.option_throw<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
                 REQUIRE(tmp->percent == true);
                 REQUIRE(tmp->value == 100);
             }
@@ -132,7 +156,7 @@ SCENARIO("Config accessor functions perform as expected.", "[Config]") {
         WHEN("A float or percent is set as a float through the string interface.") {
             config.set_deserialize_strict("first_layer_extrusion_width", "100");
             THEN("Value and percent flag are 100/false") {
-                auto tmp = config.opt<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
+                auto tmp = config.option_throw<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
                 REQUIRE(tmp->percent == false);
                 REQUIRE(tmp->value == 100);
             }
@@ -140,7 +164,7 @@ SCENARIO("Config accessor functions perform as expected.", "[Config]") {
         WHEN("A float or percent is set as a float through the int interface.") {
             config.set("first_layer_extrusion_width", 100);
             THEN("Value and percent flag are 100/false") {
-                auto tmp = config.opt<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
+                auto tmp = config.option_throw<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
                 REQUIRE(tmp->percent == false);
                 REQUIRE(tmp->value == 100);
             }
@@ -148,7 +172,7 @@ SCENARIO("Config accessor functions perform as expected.", "[Config]") {
         WHEN("A float or percent is set as a float through the double interface.") {
             config.set("first_layer_extrusion_width", 100.5);
             THEN("Value and percent flag are 100.5/false") {
-                auto tmp = config.opt<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
+                auto tmp = config.option_throw<ConfigOptionFloatOrPercent>("first_layer_extrusion_width");
                 REQUIRE(tmp->percent == false);
                 REQUIRE(tmp->value == 100.5);
             }
@@ -220,8 +244,8 @@ SCENARIO("DynamicPrintConfig serialization", "[Config]") {
             cereal::BinaryOutputArchive oarchive(ss);
             oarchive(cfg);
             serialized = ss.str();
-        } catch (const std::runtime_error & /* e */) {
-            // e.what();
+        } catch (const std::runtime_error &e) {
+            FAIL("Binary config save failed: " << e.what());
         }
 
         THEN("Config object contains ini file options.") {
@@ -230,8 +254,8 @@ SCENARIO("DynamicPrintConfig serialization", "[Config]") {
                 std::stringstream ss(serialized);
                 cereal::BinaryInputArchive iarchive(ss);
                 iarchive(cfg2);
-            } catch (const std::runtime_error & /* e */) {
-                // e.what();
+            } catch (const std::runtime_error &e) {
+                FAIL("Binary config load failed: " << e.what());
             }
             REQUIRE(cfg == cfg2);
         }

@@ -334,7 +334,8 @@ static t_config_enum_values s_keys_map_SupportType{
     { "normal(auto)",   stNormalAuto },
     { "tree(auto)", stTreeAuto },
     { "normal(manual)", stNormal },
-    { "tree(manual)", stTree }
+    { "tree(manual)", stTree },
+    { "printfins", stPrintFins }
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(SupportType)
 
@@ -5413,12 +5414,20 @@ void PrintConfigDef::init_fff_params()
     def->enum_values.push_back("tree(auto)");
     def->enum_values.push_back("normal(manual)");
     def->enum_values.push_back("tree(manual)");
+    def->enum_values.push_back("printfins");
     def->enum_labels.push_back(L("normal(auto)"));
     def->enum_labels.push_back(L("tree(auto)"));
     def->enum_labels.push_back(L("normal(manual)"));
     def->enum_labels.push_back(L("tree(manual)"));
+    def->enum_labels.push_back("PrintFins");
     def->mode = comSimple;
     def->set_default_value(new ConfigOptionEnum<SupportType>(stNormalAuto));
+
+    // Host settings only. Geometry/defaults remain in the pinned upstream engine.
+    def = this->add("printfins_options", coString);
+    def->label = L("PrintFins settings");
+    def->category = L("Support");
+    def->set_default_value(new ConfigOptionString("{}"));
 
     def = this->add("support_object_xy_distance", coFloat);
     def->label = L("Support/object xy distance");

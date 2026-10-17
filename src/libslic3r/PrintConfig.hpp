@@ -170,7 +170,7 @@ enum SupportMaterialInterfacePattern {
 
 // BBS
 enum SupportType {
-    stNormalAuto, stTreeAuto, stNormal, stTree
+    stNormalAuto, stTreeAuto, stNormal, stTree, stPrintFins
 };
 inline bool is_tree(SupportType stype)
 {
@@ -970,6 +970,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionBool,                enable_support))
     // Automatic supports (generated based on support_threshold_angle).
     ((ConfigOptionEnum<SupportType>,   support_type))
+    ((ConfigOptionString,             printfins_options))
     // Direction of the support pattern (in XY plane).`
     ((ConfigOptionFloat,               support_angle))
     ((ConfigOptionBool,                support_on_build_plate_only))

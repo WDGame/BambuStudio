@@ -155,14 +155,16 @@ void OptionsGroup::set_max_win_width(int max_win_width)
 
 void OptionsGroup::remove_option_if(std::function<bool(std::string const &)> const &comp)
 {
+    // Full-width widgets have a line but no mode entry (see append_line).
+    // Rebuild the modes instead of indexing them with a line index.
+    m_options_mode.clear();
     for (auto &l : m_lines) {
         auto &opts = const_cast<std::vector<Option> &>(l.get_options());
         opts.erase(std::remove_if(opts.begin(), opts.end(), [&comp](Option &o) { return comp(o.opt.opt_key); }), opts.end());
         l.undo_to_sys = true;
-    }
-    for (int i = m_lines.size() - 1; i >= 0; --i) {
-        if (m_lines[i].get_options().empty())
-            m_options_mode.erase(m_options_mode.begin() + i);
+        if (!opts.empty() && !(l.full_width &&
+            (l.widget != nullptr || !l.get_extra_widgets().empty())))
+            m_options_mode.push_back(opts.front().opt.mode);
     }
     m_lines.erase(std::remove_if(m_lines.begin(), m_lines.end(), [](auto &l) { return l.get_options().empty(); }), m_lines.end());
     // TODO: remove items from g->m_options;
@@ -217,15 +219,16 @@ void OptionsGroup::append_line(const Line& line)
 {
 	m_lines.emplace_back(line);
 
+	// Config-bound widgets also participate in reload_config(), even without a Field.
+	auto option_set = line.get_options();
+	for (auto opt : option_set)
+		m_options.emplace(opt.opt_id, opt);
+
 	if (line.full_width && (
 		line.widget != nullptr ||
 		!line.get_extra_widgets().empty())
 		)
 		return;
-
-	auto option_set = line.get_options();
-	for (auto opt : option_set)
-		m_options.emplace(opt.opt_id, opt);
 
 	// add mode value for current line to m_options_mode
     if (!option_set.empty())

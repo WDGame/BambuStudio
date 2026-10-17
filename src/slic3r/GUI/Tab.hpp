@@ -16,6 +16,7 @@
 //	       - Single preset item: name, file is default or external.
 
 #include <wx/panel.h>
+#include <wx/weakref.h>
 #include <wx/notebook.h>
 #include <wx/listbook.h>
 #include <wx/scrolwin.h>
@@ -494,6 +495,7 @@ public:
 	bool 		supports_printer_technology(const PrinterTechnology tech) const override { return tech == ptFFF; }
 
 private:
+	wxWeakRef<wxWindow> m_printfins_settings;
 	ogStaticText*	m_recommended_thin_wall_thickness_description_line = nullptr;
 	ogStaticText*	m_top_bottom_shell_thickness_explanation = nullptr;
 };

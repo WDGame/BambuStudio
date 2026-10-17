@@ -31,6 +31,25 @@ if (TARGET OpenVDB::openvdb)
 endif()
     
 target_link_libraries(${_TEST_NAME}_tests test_common libslic3r)
+# The current 3MF path also uses host utilities from libslic3r_gui.
+if (TARGET libslic3r_gui)
+# Focused native configuration/3MF regressions without unrelated SLA test APIs.
+add_executable(printfins_integration_tests
+    libslic3r_tests.cpp
+    test_config.cpp
+    test_3mf.cpp
+    ../printfins/native-options-group.cpp
+)
+target_link_libraries(printfins_integration_tests test_common libslic3r_gui)
+target_include_directories(printfins_integration_tests PRIVATE "$<TARGET_PROPERTY:libslic3r_gui,INCLUDE_DIRECTORIES>")
+if (MSVC)
+    target_link_options(printfins_integration_tests PRIVATE /DEBUG:FULL /OPT:REF /OPT:ICF)
+endif()
+if (WIN32)
+    target_link_libraries(printfins_integration_tests bcrypt)
+endif()
+set_property(TARGET printfins_integration_tests PROPERTY FOLDER "tests")
+endif()
 set_property(TARGET ${_TEST_NAME}_tests PROPERTY FOLDER "tests")
 
 if (WIN32)
