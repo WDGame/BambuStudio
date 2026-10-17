@@ -6454,6 +6454,9 @@ class AuiMgr : public wxAuiManager
 {
 public:
     AuiMgr() : wxAuiManager() {
+#ifdef __WXMSW__
+        SetFlags(GetFlags() | wxAUI_MGR_LIVE_RESIZE);
+#endif
     }
 
     virtual wxAuiFloatingFrame *CreateFloatingFrame(wxWindow *parent, const wxAuiPaneInfo &p) override {
