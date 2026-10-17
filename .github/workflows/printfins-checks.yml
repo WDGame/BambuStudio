@@ -1,0 +1,44 @@
+name: PrintFins checks
+
+on:
+  pull_request:
+    branches: [integration]
+  push:
+    branches: [integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: printfins-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: PrintFins source and regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify original PrintFins source hashes and Git blobs
+        run: python scripts/printfins/check-snapshot.py
+
+      - name: Run PrintFins Node regression tests
+        run: node --test tests/printfins/*.test.mjs
+
+      - name: Run PrintFins Python regression tests
+        run: python -m unittest discover -s tests/printfins -p 'test_*.py' -v
