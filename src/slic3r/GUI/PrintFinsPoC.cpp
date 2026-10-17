@@ -592,8 +592,14 @@ public:
                 control.reset->Enable(changed);
             }
             m_generate->Enable(config.opt_bool("enable_support"));
-            m_status->SetLabel("Auto: select one complete model. Layer heights come from Bambu Studio.\nGenerate before slicing; fins become ordinary printable parts.");
+            const bool full = current.at("mode") == "full";
+            m_generate->SetLabel(full ? "Generate PrintFins (Full Coverage)" : "Generate PrintFins (Auto)");
+            m_status->SetLabel(full
+                ? "Full Coverage: add original fill walls under overhangs left by Auto. Wide-face coverage controls density separately.\nSelect one complete model and generate before slicing."
+                : "Auto: select one complete model. Layer heights come from Bambu Studio.\nGenerate before slicing; fins become ordinary printable parts.");
             m_status->Wrap(FromDIP(400));
+            Layout();
+            GetParent()->Layout();
         } catch (const std::exception &error) {
             m_generate->Disable();
             m_status->SetLabel(wxString::FromUTF8(error.what()));

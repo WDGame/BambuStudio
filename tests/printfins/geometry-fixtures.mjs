@@ -37,6 +37,10 @@ export const fixtures = [
     { id: 'two-overhangs', positions: [...box(-15,15,-6,6,0,3), ...box(-15,-12,-6,6,3,29), ...box(-15,15,-6,6,13,16), ...box(-15,15,-6,6,29,32)], options:{ padStyle:'off',tines:false }, expected:'generated' },
     { id: 'flat-no-support', positions:box(-10,10,-10,10,0,5), options:{padStyle:'off',tines:false}, expected:'empty' },
 ];
+// Full must add fill walls while retaining separate original Sway pieces.
+export const fullCoverageSwayFixture = { id: 'full-sway-shelf',
+    positions: [...box(0,10,0,20,0,112), ...box(10,70,0,20,110,112)],
+    options: { 'sway.on': true }, expected: 'generated' };
 export function cancellationFixture() {
     const positions=[];
     const small=pose(box(-1.5,1.5,-1.5,1.5,0,5),35);

@@ -1,5 +1,6 @@
 // Host transport only: geometry and defaults belong to the unchanged upstream engine.
-import { computeFins, optionsFromDialog, ENGINE_DEFAULTS } from './vendor/plugins/shared/engine/fins_entry.js';
+import { computeFins, ENGINE_DEFAULTS } from './vendor/plugins/shared/engine/fins_entry.js';
+import { optionsFromSettings } from './schema.mjs';
 
 export function generate({ positions, options = {} }) {
     if (!Array.isArray(positions) || !positions.length || positions.length % 9 ||
@@ -12,7 +13,7 @@ export function generate({ positions, options = {} }) {
     // Native contour checks use the actual first-layer plane. Upstream only
     // accepts the regular layer height; no custom layer-grid algorithm is added.
     const { firstLayerHeight, ...values } = options;
-    const engineOptions = optionsFromDialog(values);
+    const engineOptions = optionsFromSettings(values);
     const layerHeight = engineOptions.layerHeight ?? ENGINE_DEFAULTS.layerHeight;
     const first = firstLayerHeight ?? layerHeight;
     if (!Number.isFinite(first) || first <= 0)

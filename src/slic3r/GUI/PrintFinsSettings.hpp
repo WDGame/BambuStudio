@@ -17,6 +17,11 @@ inline Json native_schema(Json schema)
     options.erase(std::remove_if(options.begin(), options.end(), [](const auto &spec) {
         return spec.at("key") == "tineDir" || spec.at("key") == "pinDepth";
     }), options.end()); // Resin-only controls are not part of this FDM host.
+    options.insert(options.begin(), Json{
+        {"key", "mode"}, {"section", "setup"}, {"type", "choice"}, {"default", "auto"},
+        {"label", "Generation mode"},
+        {"choices", Json::array({{{"value", "auto"}, {"label", "Auto"}}, {{"value", "full"}, {"label", "Full Coverage"}}})},
+        {"tooltip", "Auto places fins automatically. Full Coverage adds original fill walls under overhangs left by Auto. Wide-face coverage controls density separately."}});
     for (auto &spec : schema.at("options")) {
         const auto key = spec.at("key").get<std::string>();
         if (key == "threshold" || key == "sway.gripFrom") spec["step"] = 1.;

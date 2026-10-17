@@ -1,8 +1,8 @@
-import { optionVisible, optionsFromDialog } from './vendor/plugins/shared/engine/fins_entry.js';
-import { FDM_SCHEMA as OPTIONS_SCHEMA } from './schema.mjs';
+import { optionVisible } from './vendor/plugins/shared/engine/fins_entry.js';
+import { FDM_SCHEMA as OPTIONS_SCHEMA, optionsFromSettings } from './schema.mjs';
 
-// Only host presentation and unit conversion; defaults, validation and visibility
-// remain owned by the original schema and its entry point.
+// Host presentation and unit conversion, including the host-only generation mode.
+// Other defaults, validation and visibility use the original schema/entry point.
 export function buildSettings(form, document) {
     const controls = new Map();
     const rows = new Map();
@@ -62,7 +62,7 @@ export function buildSettings(form, document) {
     const updateVisibility = () => {
         const values = read();
         for (const [key, row] of rows) {
-            row.hidden = !optionVisible(key, values);
+            row.hidden = key !== 'mode' && !optionVisible(key, values);
             // Hidden fields keep their values, but do not block HTML validity.
             controls.get(key).disabled = row.hidden;
         }
@@ -75,7 +75,7 @@ export function buildSettings(form, document) {
         // Omit hidden controls: dependencies may have made a previously edited
         // field invalid. Upstream uses its own defaults for absent values.
         for (const [key, row] of rows) if (row.hidden) delete values[key];
-        optionsFromDialog(values);
+        optionsFromSettings(values);
         return values;
     };
 }
