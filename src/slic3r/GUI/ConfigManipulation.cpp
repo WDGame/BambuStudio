@@ -970,7 +970,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
                     "support_type", "support_on_build_plate_only",
                     "support_remove_small_overhang","support_interface_not_for_body",
                     "support_object_xy_distance","support_object_first_layer_gap"/*, "independent_support_layer_height"*/})
-        toggle_field(el, have_support_material);
+        toggle_field(el, have_support_material && (support_type != stPrintFins || std::string(el) == "support_type"));
     toggle_field("support_threshold_angle", have_support_material && is_auto(support_type));
     //toggle_field("support_closing_radius", have_support_material && support_style == smsSnug);
 

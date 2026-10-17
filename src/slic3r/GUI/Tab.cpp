@@ -1,6 +1,7 @@
 // #include "libslic3r/GCodeSender.hpp"
 //#include "slic3r/Utils/Serial.hpp"
 #include "Tab.hpp"
+#include "PrintFinsPoC.hpp"
 #include "PresetHints.hpp"
 #include "DeviceCore/DevConfigUtil.h"
 #include "libslic3r/Config.hpp"
@@ -3406,6 +3407,28 @@ void TabPrint::build()
         optgroup = page->new_optgroup(L("Support"), L"param_support");
         optgroup->append_single_option_line("enable_support", "support");
         optgroup->append_single_option_line("support_type", "support#support-types");
+        {
+            Line native_settings{"", ""};
+            native_settings.full_width = 1;
+            // Keep/filter this widget with the setting in object/plate scopes.
+            native_settings.append_option(optgroup->get_option("printfins_options"));
+            native_settings.widget = [this](wxWindow *parent) {
+                m_printfins_settings = create_printfins_settings(parent,
+                    [this]() -> const DynamicPrintConfig & { return *m_config; },
+                    // Same saved-preset source as ConfigOptionsGroup::m_get_initial_config.
+                    [this]() { return m_presets->get_selected_preset().config; },
+                    [this](const std::string &value) {
+                        if (m_config->opt_string("printfins_options") == value) return;
+                        change_opt_value(*m_config, "printfins_options", value);
+                        update_dirty();
+                        on_value_change("printfins_options", value);
+                    });
+                auto *sizer = new wxBoxSizer(wxVERTICAL);
+                sizer->Add(m_printfins_settings.get(), 0, wxEXPAND);
+                return sizer;
+            };
+            optgroup->append_line(native_settings);
+        }
         optgroup->append_single_option_line("support_style", "support#support-styles");
         optgroup->append_single_option_line("support_threshold_angle", "support#threshold-angle");
         optgroup->append_single_option_line("support_on_build_plate_only");
@@ -3602,6 +3625,7 @@ void TabPrint::toggle_options()
     }
 
     m_config_manipulation.toggle_print_fff_options(m_config, int(intptr_t(m_extruder_switch->GetClientData())), m_type < Preset::TYPE_COUNT);
+    refresh_printfins_settings(m_printfins_settings.get());
 
     Field *field = m_active_page->get_field("support_style");
     auto   support_type = m_config->opt_enum<SupportType>("support_type");
@@ -3655,6 +3679,7 @@ void TabPrint::update()
 
 void TabPrint::clear_pages()
 {
+    m_printfins_settings = nullptr;
     Tab::clear_pages();
 
     m_recommended_thin_wall_thickness_description_line = nullptr;

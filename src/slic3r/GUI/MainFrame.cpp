@@ -4246,7 +4246,8 @@ void MainFrame::select_tab(size_t tab/* = size_t(-1)*/)
         }*/
 #endif
         if (tab == MainFrame::tp3DEditor && m_layout == ESettingsLayout::Old)
-            m_plater->canvas3D()->render();
+            // Fit the camera after the newly shown Prepare page has its final layout.
+            m_plater->canvas3D()->set_as_dirty();
         else if (was_hidden) {
             Tab* cur_tab = dynamic_cast<Tab*>(m_tabpanel->GetPage(new_selection));
             if (cur_tab)

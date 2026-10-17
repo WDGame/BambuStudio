@@ -867,6 +867,15 @@ void PrintObject::generate_support_material()
     if (this->set_started(posSupportMaterial)) {
         this->clear_support_layers();
 
+        // PrintFins are ordinary model volumes, prepared explicitly in the GUI.
+        // Never silently add normal/tree supports (or a raft) to this mode.
+        if (m_config.support_type.value == stPrintFins) {
+            if (m_config.raft_layers.value > 0)
+                throw SlicingError("PrintFins does not support a Bambu raft. Set raft layers to zero.");
+            this->set_done(posSupportMaterial);
+            return;
+        }
+
         if (!has_support() && !m_print->get_no_check_flag()) {
             // BBS: pop a warning if objects have significant amount of overhangs but support material is not enabled
             // Note: we also need to pop warning if support is disabled and only raft is enabled
@@ -1166,6 +1175,7 @@ bool PrintObject::invalidate_state_by_config_options(
 	        }
         } else if (
         	   opt_key == "support_type"
+            || opt_key == "printfins_options"
             || opt_key == "support_angle"
             || opt_key == "support_on_build_plate_only"
             || opt_key == "support_critical_regions_only"

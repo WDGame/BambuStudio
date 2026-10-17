@@ -1,4 +1,5 @@
 #include "PrintFinsPoC.hpp"
+#include "PrintFinsSettings.hpp"
 #include "Plater.hpp"
 #include "Selection.hpp"
 #include "GUI_App.hpp"
@@ -12,6 +13,15 @@
 #include <boost/log/trivial.hpp>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <wx/checkbox.h>
+#include <wx/choice.h>
+#include <wx/panel.h>
+#include <wx/textctrl.h>
+#include "Widgets/Button.hpp"
+#include "Widgets/TextInput.hpp"
+#include "Field.hpp"
+#include "libslic3r/LocalesUtils.hpp"
 #include <wx/dialog.h>
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
@@ -82,6 +92,8 @@ class PrintFinsDialog final : public wxDialog {
     Plater &m_plater;
     int m_object_index;
     Json m_request;
+    Json m_layer_heights;
+    bool m_native;
     ObjectID m_object_id;
     wxWebView *m_web = nullptr;
     wxStaticText *m_status;
@@ -122,7 +134,7 @@ class PrintFinsDialog final : public wxDialog {
             size_t(m_object_index) >= model.objects.size() || model.objects[m_object_index]->id() != m_object_id)
             throw std::runtime_error("Model selection changed; PrintFins result discarded.");
         ModelObject &object = *model.objects[m_object_index];
-        if (posed_mesh(object) != m_request["positions"] || layer_heights(m_plater, object) != m_request["options"])
+        if (posed_mesh(object) != m_request["positions"] || layer_heights(m_plater, object) != m_layer_heights)
             throw std::runtime_error("Model or layer settings changed; PrintFins result discarded.");
         const auto triangles = result.at("triangles").get<std::vector<double>>();
         if (triangles.size() % 9 || triangles.size() > 9000000)
@@ -210,17 +222,21 @@ class PrintFinsDialog final : public wxDialog {
         }
         m_finished = true;
         m_timeout.Stop();
+        BOOST_LOG_TRIVIAL(info) << "PrintFins accepted " << (prepared.volumes.size() - original_volumes) << " new model volumes.";
         EndModal(wxID_OK);
     }
 
 public:
-    PrintFinsDialog(Plater &plater, int index) :
+    PrintFinsDialog(Plater &plater, int index, const Json *options = nullptr) :
         wxDialog(&plater, wxID_ANY, "PrintFins", wxDefaultPosition, wxSize(760, 780), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-        m_plater(plater), m_object_index(index), m_timeout(this)
+        m_plater(plater), m_object_index(index), m_native(options != nullptr), m_timeout(this)
     {
         const auto &object = *plater.model().objects[index];
         m_object_id = object.id();
-        m_request = {{"positions", posed_mesh(object)}, {"options", layer_heights(plater, object)}};
+        m_layer_heights = layer_heights(plater, object);
+        Json values = options ? *options : Json::object();
+        values.update(m_layer_heights); // Actual slicer heights always win.
+        m_request = {{"positions", posed_mesh(object)}, {"options", values}};
         auto *layout = new wxBoxSizer(wxVERTICAL);
         m_status = new wxStaticText(this, wxID_ANY, "Loading PrintFins settings...");
         layout->Add(m_status, 0, wxALL | wxEXPAND, 12);
@@ -234,12 +250,18 @@ public:
 #if defined(_WIN32) && wxUSE_WEBVIEW_EDGE
         m_web = WebView::CreateWebView(this, "about:blank", "PrintFins");
         if (m_web) {
-            layout->Add(m_web, 1, wxEXPAND | wxLEFT | wxRIGHT, 12);
+            if (m_native) m_web->Hide();
+            else layout->Add(m_web, 1, wxEXPAND | wxLEFT | wxRIGHT, 12);
             m_web->Bind(wxEVT_WEBVIEW_NAVIGATING, [](wxWebViewEvent &e) {
                 if (e.GetURL() != "about:blank" && e.GetURL() != "https://printfins-poc.invalid/tool.html") e.Veto();
             });
             m_web->Bind(wxEVT_WEBVIEW_NEWWINDOW, [](wxWebViewEvent &e) { e.Veto(); });
-            m_web->Bind(wxEVT_WEBVIEW_ERROR, [this](wxWebViewEvent &) { fail("Cannot load the local PrintFins settings page."); });
+            m_web->Bind(wxEVT_WEBVIEW_ERROR, [this](wxWebViewEvent &event) {
+                BOOST_LOG_TRIVIAL(error) << "PrintFins WebView: url=" << event.GetURL().ToStdString()
+                    << " code=" << event.GetInt() << " description=" << event.GetString().ToStdString()
+                    << " mapped=" << m_mapped << " ready=" << m_ready;
+                fail("Cannot load the local PrintFins settings page.");
+            });
             m_web->Bind(wxEVT_WEBVIEW_LOADED, [this](wxWebViewEvent &) {
                 if (m_mapped || m_finished) return;
                 try {
@@ -251,6 +273,7 @@ public:
                     if (FAILED(local->SetVirtualHostNameToFolderMapping(L"printfins-poc.invalid", assets.wc_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY)))
                         throw std::runtime_error("Cannot map local PrintFins resources.");
                     m_mapped = true;
+                    BOOST_LOG_TRIVIAL(info) << "PrintFins mapped local resources; loading tool page.";
                     m_web->LoadURL("https://printfins-poc.invalid/tool.html");
                 } catch (const std::exception &e) { fail(e.what()); }
             });
@@ -262,14 +285,18 @@ public:
                     if (action == "cancel") {
                         cancel();
                     } else if (action == "ready" && !m_ready) {
+                        BOOST_LOG_TRIVIAL(info) << "PrintFins page ready.";
                         m_ready = true;
                         m_timeout.Stop();
-                        if (!WebView::RunScript(m_web, wxString::FromUTF8("window.initPrintFins(" + m_request.dump() + ");")))
+                        const std::string script = "window.initPrintFins(" + m_request.dump() + ");" +
+                            (m_native ? "document.getElementById('generate').click();" : "");
+                        if (!WebView::RunScript(m_web, wxString::FromUTF8(script)))
                             throw std::runtime_error("Cannot initialize PrintFins settings.");
-                        m_status->SetLabel("Generate fins for the selected model, or cancel to leave the project unchanged.");
+                        if (!m_native) m_status->SetLabel("Generate fins for the selected model, or cancel to leave the project unchanged.");
                         m_status->Wrap(700);
                         Layout();
                     } else if (action == "computing" && m_ready && !m_busy) {
+                        BOOST_LOG_TRIVIAL(info) << "PrintFins worker computing.";
                         m_busy = true;
                         m_status->SetLabel("Generating PrintFins... Cancel remains available.");
                         m_timeout.StartOnce(120000);
@@ -290,11 +317,306 @@ public:
         CallAfter([this] { fail("PrintFins currently requires Windows with WebView2."); });
 #endif
         layout->Add(CreateButtonSizer(wxCANCEL), 0, wxALL | wxALIGN_RIGHT, 12);
-        SetMinSize(wxSize(540, 460));
+        SetMinSize(m_native ? wxSize(540, 160) : wxSize(540, 460));
+        if (m_native) SetSize(wxSize(580, 180));
         CentreOnParent();
     }
 };
+
+// The schema is read from the verified upstream snapshot, never copied defaults.
+Json settings_schema()
+{
+    std::ifstream stream(resources_dir() + "/printfins/vendor/plugins/shared/engine/options.json");
+    if (!stream) throw std::runtime_error("Cannot read the original PrintFins options schema.");
+    return Json::parse(stream);
+}
+
+bool setting_condition(const Json &condition, const Json &values)
+{
+    if (condition.is_string()) return values.at(condition.get<std::string>()).get<bool>();
+    if (condition.contains("any")) {
+        for (const auto &item : condition["any"]) if (setting_condition(item, values)) return true;
+        return false;
+    }
+    const auto &value = values.at(condition.at("key").get<std::string>());
+    for (const auto &choice : condition.at("in")) if (choice == value) return true;
+    return false;
+}
+
+class NativePrintFinsSettings final : public wxPanel {
+    struct Control { Json spec; wxWindow *input; wxSizer *row; ScalableButton *reset; };
+    std::vector<Control> m_controls;
+    Json m_schema;
+    std::function<const DynamicPrintConfig &()> m_config;
+    std::function<DynamicPrintConfig()> m_preset;
+    std::function<void(const std::string &)> m_save;
+    wxStaticText *m_status;
+    Button *m_generate;
+    std::string m_loaded;
+
+    Json read() const
+    {
+        Json values = Json::object();
+        for (const auto &control : m_controls)
+            values[control.spec.at("key").get<std::string>()] = control.spec.at("default");
+        for (const auto &control : m_controls) {
+            const auto key = control.spec.at("key").get<std::string>();
+            bool visible = true;
+            for (const auto &condition : control.spec.value("showIf", Json::array()))
+                visible = visible && setting_condition(condition, values);
+            // Like the original dialog, hidden fields cannot block submission.
+            if (!visible) { values.erase(key); continue; }
+            if (auto *check = dynamic_cast<wxCheckBox *>(control.input)) values[key] = check->GetValue();
+            else if (auto *number = dynamic_cast<::TextInput *>(control.input)) {
+                auto *text = number->GetTextCtrl();
+                wxString entry = text->GetValue();
+                const char separator = is_decimal_separator_point() ? '.' : ',';
+                if (entry.Replace(separator == '.' ? ',' : '.', separator, false)) text->ChangeValue(entry);
+                double displayed;
+                const bool in_range = number->CheckValid(false);
+                if (!entry.ToDouble(&displayed) || !std::isfinite(displayed))
+                    throw std::runtime_error("Enter a finite number for PrintFins: " + key);
+                if (!in_range) throw std::runtime_error("PrintFins setting outside the allowed range: " + key);
+                const double value = displayed / (control.spec.value("percent", false) ? 100. : 1.);
+                PrintFinsSettings::validate(control.spec, value);
+                values[key] = value;
+            }
+            else {
+                const int choice = static_cast<wxChoice *>(control.input)->GetSelection();
+                if (choice < 0) throw std::runtime_error("Choose a valid PrintFins setting.");
+                values[key] = control.spec.at("choices").at(choice).at("value");
+            }
+        }
+        return values;
+    }
+
+    void commit()
+    {
+        try {
+            const auto visible = read();
+            const auto previous = PrintFinsSettings::values(m_schema, m_config());
+            auto updated = previous;
+            updated.update(visible); // Keep hidden settings when tines/braces are disabled.
+            dependencies(updated);
+            if (updated != previous) m_save(PrintFinsSettings::serialize(m_schema, updated, m_preset()));
+            refresh();
+        } catch (const std::exception &error) { m_status->SetLabel(wxString::FromUTF8(error.what())); }
+    }
+
+    void dependencies(const Json &values)
+    {
+        for (const auto &control : m_controls) {
+            bool visible = true;
+            for (const auto &condition : control.spec.value("showIf", Json::array()))
+                visible = visible && setting_condition(condition, values);
+            GetSizer()->Show(control.row, visible, true);
+        }
+        Layout();
+        GetParent()->Layout();
+    }
+
+public:
+    // Bambu group visibility updates must not reveal this panel for other types.
+    bool Show(bool show = true) override
+    {
+        return wxPanel::Show(show && m_config().opt_enum<SupportType>("support_type") == stPrintFins);
+    }
+
+    NativePrintFinsSettings(wxWindow *parent, std::function<const DynamicPrintConfig &()> config,
+                           std::function<DynamicPrintConfig()> preset,
+                           std::function<void(const std::string &)> save) :
+        wxPanel(parent), m_schema(PrintFinsSettings::native_schema(settings_schema())),
+        m_config(std::move(config)), m_preset(std::move(preset)), m_save(std::move(save))
+    {
+        auto *layout = new wxBoxSizer(wxVERTICAL);
+        SetSizer(layout);
+        for (const auto &spec : m_schema.at("options")) {
+            if (spec.contains("hostSupplied")) continue;
+            auto *row = new wxBoxSizer(wxHORIZONTAL);
+            auto *label = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(spec.at("label").get<std::string>()));
+            row->Add(label, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
+            wxWindow *input;
+            const auto type = spec.at("type").get<std::string>();
+            if (type == "bool") input = new wxCheckBox(this, wxID_ANY, "");
+            else if (type == "number") {
+                const double scale = spec.value("percent", false) ? 100. : 1.;
+                const auto key = spec.at("key").get<std::string>();
+                const wxString unit = spec.value("percent", false) ? "%" : key == "threshold" ? wxString::FromUTF8("\xc2\xb0") : "mm";
+                auto *number = new ::TextInput(this, double_to_string(spec.at("default").get<double>() * scale, 12),
+                    unit, "", wxDefaultPosition, wxSize(FromDIP(100), -1), wxTE_PROCESS_ENTER);
+                number->SetValCheckers({TextInputValChecker::CreateDoubleRangeChecker(
+                    spec.at("min").get<double>() * scale, spec.at("max").get<double>() * scale, false)});
+                wxGetApp().UpdateDarkUI(number);
+                input = number;
+            } else {
+                auto *choice = new wxChoice(this, wxID_ANY);
+                for (const auto &item : spec.at("choices")) choice->Append(wxString::FromUTF8(item.at("label").get<std::string>()));
+                input = choice;
+            }
+            input->SetToolTip(wxString::FromUTF8(spec.value("tooltip", "")));
+            row->Add(input, 0, wxALIGN_CENTER_VERTICAL);
+            if (auto *number = dynamic_cast<::TextInput *>(input)) {
+                auto advance = [this, number, spec](int direction) {
+                    try {
+                        wxString entry = number->GetTextCtrl()->GetValue();
+                        const char separator = is_decimal_separator_point() ? '.' : ',';
+                        entry.Replace(separator == '.' ? ',' : '.', separator, false);
+                        double displayed;
+                        if (!entry.ToDouble(&displayed)) throw std::runtime_error("Enter a valid PrintFins number.");
+                        const double scale = spec.value("percent", false) ? 100. : 1.;
+                        number->GetTextCtrl()->ChangeValue(double_to_string(
+                            PrintFinsSettings::step(spec, displayed / scale, direction) * scale, 12));
+                        commit();
+                    } catch (const std::exception &error) { m_status->SetLabel(wxString::FromUTF8(error.what())); }
+                };
+                auto *arrows = new wxBoxSizer(wxVERTICAL);
+                for (int direction : {1, -1}) {
+                    auto *button = new Button(this, "", direction > 0 ? "spin_inc" : "spin_dec", wxBORDER_NONE, 6);
+                    button->SetPaddingSize(wxSize(FromDIP(3), 0));
+                    button->DisableFocusFromKeyboard();
+                    button->Bind(wxEVT_BUTTON, [advance, direction](wxCommandEvent &) { advance(direction); });
+                    arrows->Add(button, 0);
+                }
+                row->Add(arrows, 0, wxALIGN_CENTER_VERTICAL);
+                number->GetTextCtrl()->Bind(wxEVT_KEY_DOWN, [advance](wxKeyEvent &event) {
+                    if (event.GetKeyCode() == WXK_UP) advance(1);
+                    else if (event.GetKeyCode() == WXK_DOWN) advance(-1);
+                    else event.Skip();
+                });
+            }
+            const auto hint = spec.value("hint", "");
+            if (!hint.empty() && type != "number") row->Add(new wxStaticText(this, wxID_ANY, wxString::FromUTF8(hint)),
+                                       0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(5));
+            auto *reset = new ScalableButton(this, wxID_ANY, "undo");
+            reset->SetToolTip(_L("Click to drop current modify and reset to saved value."));
+            const auto key = spec.at("key").get<std::string>();
+            reset->Bind(wxEVT_BUTTON, [this, key](wxCommandEvent &) {
+                try {
+                    const auto preset = m_preset();
+                    m_save(PrintFinsSettings::serialize(m_schema,
+                        PrintFinsSettings::reset(m_schema, m_config(), preset, key), preset));
+                    refresh();
+                } catch (const std::exception &error) { m_status->SetLabel(wxString::FromUTF8(error.what())); }
+            });
+            row->Add(reset, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(5));
+            layout->Add(row, 0, wxEXPAND | wxBOTTOM, FromDIP(5));
+            m_controls.push_back({spec, input, row, reset});
+        }
+        m_status = new wxStaticText(this, wxID_ANY, "");
+        layout->Add(m_status, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(6));
+        m_generate = new Button(this, "Generate PrintFins (Auto)");
+        layout->Add(m_generate, 0, wxALIGN_RIGHT);
+        auto edited = [this](wxCommandEvent &) {
+            commit();
+        };
+        Bind(wxEVT_CHECKBOX, edited);
+        Bind(wxEVT_CHOICE, edited);
+        // Enter/focus commit typed numeric values through the same native event.
+        for (const auto &control : m_controls) if (auto *number = dynamic_cast<::TextInput *>(control.input)) {
+            // TextInput forwards Enter with ProcessEventLocally(), not to its parent.
+            number->Bind(wxEVT_TEXT_ENTER, edited);
+            number->GetTextCtrl()->Bind(wxEVT_KILL_FOCUS, [this, edited](wxFocusEvent &event) mutable {
+                wxCommandEvent changed; edited(changed); event.Skip();
+            });
+        }
+        m_generate->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) {
+            try {
+                auto &plater = *wxGetApp().plater();
+                if (!plater.can_do_ui_job() || !plater.can_add_model() || plater.printer_technology() != ptFFF)
+                    throw std::runtime_error("Finish the current operation and select one complete model in Prepare.");
+                const int index = selected_object(plater);
+                auto effective = m_config();
+                effective.apply(plater.model().objects[index]->config.get());
+                if (effective.opt_enum<SupportType>("support_type") != stPrintFins || !effective.opt_bool("enable_support"))
+                    throw std::runtime_error("Enable the PrintFins support type for the selected model first.");
+                if (effective.opt_int("raft_layers") != 0)
+                    throw std::runtime_error("Set Bambu raft layers to zero before generating PrintFins.");
+                const Json values = read();
+                const auto *stored = effective.option<ConfigOptionString>("printfins_options");
+                if (stored) {
+                    const auto saved = Json::parse(stored->value);
+                    for (auto it = saved.begin(); it != saved.end(); ++it) {
+                        if (std::none_of(m_controls.begin(), m_controls.end(), [&](const auto &control) { return control.spec.at("key") == it.key(); }))
+                            throw std::runtime_error("Unknown PrintFins setting: " + it.key());
+                        if (values.contains(it.key()) && values.at(it.key()) != it.value())
+                            throw std::runtime_error("The selected model has different PrintFins overrides. Open its object settings before generating.");
+                    }
+                }
+                PrintFinsDialog dialog(plater, index, &values);
+                dialog.ShowModal();
+            } catch (const std::exception &error) {
+                wxMessageBox(wxString::FromUTF8(error.what()), "PrintFins", wxOK | wxICON_INFORMATION, this);
+            }
+        });
+        wxGetApp().UpdateDarkUI(this);
+        refresh();
+    }
+
+    void refresh()
+    {
+        const auto &config = m_config();
+        const bool visible = config.opt_enum<SupportType>("support_type") == stPrintFins;
+        if (Show(visible)) GetParent()->Layout();
+        if (!visible) return;
+        try {
+            const auto *option = config.option<ConfigOptionString>("printfins_options");
+            const std::string stored = option ? option->value : "{}";
+            if (stored != m_loaded) {
+                const auto saved = PrintFinsSettings::values(m_schema, config);
+                for (const auto &control : m_controls) {
+                    const auto key = control.spec.at("key").get<std::string>();
+                    const auto value = saved.value(key, control.spec.at("default"));
+                    if (auto *check = dynamic_cast<wxCheckBox *>(control.input)) check->SetValue(value.get<bool>());
+                    else if (auto *number = dynamic_cast<::TextInput *>(control.input)) {
+                        const double v = value.get<double>();
+                        number->GetTextCtrl()->ChangeValue(double_to_string(v * (control.spec.value("percent", false) ? 100. : 1.), 12));
+                    } else {
+                        int selected = wxNOT_FOUND, index = 0;
+                        for (const auto &choice : control.spec.at("choices")) {
+                            if (choice.at("value") == value) selected = index;
+                            ++index;
+                        }
+                        if (selected == wxNOT_FOUND) throw std::runtime_error("Invalid PrintFins choice: " + key);
+                        static_cast<wxChoice *>(control.input)->SetSelection(selected);
+                    }
+                }
+                m_loaded = stored;
+                dependencies(read());
+            }
+            const auto current = PrintFinsSettings::values(m_schema, config);
+            const auto baseline = PrintFinsSettings::values(m_schema, m_preset());
+            for (const auto &control : m_controls) {
+                const auto key = control.spec.at("key").get<std::string>();
+                const bool changed = current.at(key) != baseline.at(key);
+                control.reset->SetBitmap_(changed ? "undo" : "dot");
+                control.reset->Enable(changed);
+            }
+            m_generate->Enable(config.opt_bool("enable_support"));
+            m_status->SetLabel("Auto: select one complete model. Layer heights come from Bambu Studio.\nGenerate before slicing; fins become ordinary printable parts.");
+            m_status->Wrap(FromDIP(400));
+        } catch (const std::exception &error) {
+            m_generate->Disable();
+            m_status->SetLabel(wxString::FromUTF8(error.what()));
+        }
+    }
+};
 } // namespace
+
+wxWindow *create_printfins_settings(wxWindow *parent, std::function<const DynamicPrintConfig &()> config,
+                                   std::function<DynamicPrintConfig()> preset,
+                                   std::function<void(const std::string &)> save)
+{
+    try {
+        return new NativePrintFinsSettings(parent, std::move(config), std::move(preset), std::move(save));
+    } catch (const std::exception &error) {
+        return new wxStaticText(parent, wxID_ANY, wxString::FromUTF8(error.what()));
+    }
+}
+
+void refresh_printfins_settings(wxWindow *panel)
+{
+    if (auto *settings = dynamic_cast<NativePrintFinsSettings *>(panel)) settings->refresh();
+}
 
 void show_printfins_tool(Plater &plater)
 {
