@@ -1,53 +1,54 @@
-![image](https://user-images.githubusercontent.com/106916061/179006347-497d24c0-9bd6-45b7-8c49-d5cc8ecfe5d7.png)
-# BambuStudio
-Bambu Studio is a cutting-edge, feature-rich slicing software.  
-It contains project-based workflows, systematically optimized slicing algorithms, and an easy-to-use graphic interface, bringing users an incredibly smooth printing experience.
+![Bambu Studio](https://user-images.githubusercontent.com/106916061/179006347-497d24c0-9bd6-45b7-8c49-d5cc8ecfe5d7.png)
 
-Prebuilt Windows, macOS 64-bit and Linux releases are available through the [github releases page](https://github.com/bambulab/BambuStudio/releases/).
+# BambuStudio + PrintFins
 
-Bambu Studio is based on [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer) by Prusa Research, which is from [Slic3r](https://github.com/Slic3r/Slic3r) by Alessandro Ranellucci and the RepRap community.
+An independent fork of [Bambu Studio](https://github.com/bambulab/BambuStudio) with native [PrintFins](https://github.com/gittrahan/support-fins) integration.
 
-See the [wiki](https://github.com/bambulab/BambuStudio/wiki) and the [documentation directory](https://github.com/bambulab/BambuStudio/tree/master/doc) for more information.
+The project aims to provide lightweight, removable support structures directly within Bambu Studio while maintaining upstream compatibility.
 
-# What are Bambu Studio's main features?
-Key features are:
-- Basic slicing features & GCode viewer
-- Multiple plates management
-- Remote control & monitoring
-- Auto-arrange objects
-- Auto-orient objects
-- Hybrid/Tree/Normal support types, Customized support
-- multi-material printing and rich painting tools
-- multi-platform (Win/Mac/Linux) support
-- Global/Object/Part level slicing parameters
+## Features
 
-Other major features are:
-- Advanced cooling logic controlling fan speed and dynamic print speed
-- Auto brim according to mechanical analysis
-- Support arc path(G2/G3)
-- Support STEP format
-- Assembly & explosion view
-- Flushing transition-filament into infill/object during filament change
+- Native PrintFins integration in Bambu Studio's Support settings
+- Automatic support-fin generation
+- Breakaway tines and Sway Braces
+- Adjustable support gaps, coverage, bed pads and cutouts
+- Native slicing, Undo/Redo and 3MF project support
+- All standard Bambu Studio slicing and printer features
 
-# How to compile
-Following platforms are currently supported to compile:
-- Windows 64-bit, [Compile Guide](https://github.com/bambulab/BambuStudio/wiki/Windows-Compile-Guide)
-- Mac 64-bit, [Compile Guide](https://github.com/bambulab/BambuStudio/wiki/Mac-Compile-Guide)
-- Linux, [Compile Guide](https://github.com/bambulab/BambuStudio/wiki/Linux-Compile-Guide)
-  - currently we only provide linux appimages on [github releases](https://github.com/bambulab/BambuStudio/releases) for Ubuntu/Fedora, and a [flathub version](https://flathub.org/apps/com.bambulab.BambuStudio) can be used for all the linux platforms
+## Roadmap
 
-# Report issue
-You can add an issue to the [github tracker](https://github.com/bambulab/BambuStudio/issues) if **it isn't already present.**
+- Full Coverage support mode
+- Manual fin drawing and placement
+- Combined automatic and manual supports
+- Individual fin editing
+- Extended support-gap range
+- Improved support generation for complex geometry
 
-# License
-Bambu Studio is licensed under the GNU Affero General Public License, version 3. Bambu Studio is based on PrusaSlicer by PrusaResearch.
+## Development
 
-PrusaSlicer is licensed under the GNU Affero General Public License, version 3. PrusaSlicer is owned by Prusa Research. PrusaSlicer is originally based on Slic3r by Alessandro Ranellucci.
+The `integration` branch contains the latest approved development state.
 
-Slic3r is licensed under the GNU Affero General Public License, version 3. Slic3r was created by Alessandro Ranellucci with the help of many other contributors.
+PrintFins engine files are kept separate, version-pinned and verified against the original repository to simplify future updates.
 
-The GNU Affero General Public License, version 3 ensures that if you use any part of this software in any way (even behind a web server), your software must be released under the same license.
+The custom integration is currently validated on Windows x64.
 
-The bambu networking plugin is based on non-free libraries. It is optional to the Bambu Studio and provides extended networking functionalities for users.
-By default, after installing Bambu Studio without the networking plugin, you can initiate printing through the SD card after slicing is completed.
+See [Project Rules](AGENTS.md) and [PrintFins Documentation](docs/printfins-native-support.md).
 
+## Credits
+
+- [Bambu Lab](https://github.com/bambulab/BambuStudio) — Bambu Studio
+- [Matthew Trahan](https://github.com/gittrahan/support-fins) — PrintFins
+- [Prusa Research](https://github.com/prusa3d/PrusaSlicer) — PrusaSlicer
+- [Alessandro Ranellucci](https://github.com/Slic3r/Slic3r) — Slic3r
+
+## License
+
+Bambu Studio and this fork are licensed under **AGPL-3.0**.
+
+PrintFins is integrated under its original **MIT License**, with copyright and attribution preserved.
+
+The optional Bambu networking plugin contains proprietary components subject to separate terms.
+
+See [LICENSE](LICENSE) and [PrintFins LICENSE](resources/printfins/vendor/LICENSE).
+
+**This is an independent community project, not officially affiliated with Bambu Lab or PrintFins.**
