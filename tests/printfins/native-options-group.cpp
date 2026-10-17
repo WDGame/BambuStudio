@@ -32,6 +32,9 @@ TEST_CASE("PrintFins native numeric limits and decimal arrow steps", "[PrintFins
 {
     CNumericLocalesSetter numeric_locale;
     const auto schema = native_schema();
+    REQUIRE(std::none_of(schema["options"].begin(), schema["options"].end(), [](const auto &spec) {
+        return spec.at("key") == "tineDir" || spec.at("key") == "pinDepth";
+    }));
     struct Expected { const char *key; double min, max, initial, step; };
     for (const auto &expected : std::vector<Expected>{
         {"threshold",30,70,45,1}, {"tineDensity",0,1,0,0.01}, {"gap",0.1,0.4,0.2,0.01},

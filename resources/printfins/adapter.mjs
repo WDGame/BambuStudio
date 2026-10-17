@@ -7,6 +7,8 @@ export function generate({ positions, options = {} }) {
         throw new Error('PoC requires 1..100000 finite input triangles');
     if (!options || typeof options !== 'object' || Array.isArray(options))
         throw new Error('PoC options must be an object');
+    if (options.tineDir !== undefined && options.tineDir !== 'horizontal')
+        throw new Error('Bambu Studio PrintFins supports horizontal FDM tines only');
     // Native contour checks use the actual first-layer plane. Upstream only
     // accepts the regular layer height; no custom layer-grid algorithm is added.
     const { firstLayerHeight, ...values } = options;

@@ -29,6 +29,8 @@
  *   coverage.js   which red must be held (MUST / tiny HOLE / near-plate LOW) and the
  *                 reach rule that holds it -- shared with the coverage scoreboard
  *   fill.js       Full coverage: Draw-built walls under the red Auto left bare
+ *   tall.js       face ribs on walls over BRACE.tallH, last, around everything placed
+ *   downhill.js   downhill walls kept only if the whole build is no worse (#25)
  *
  * Each module imports only modules above it in this list and never fins.js.
  */
@@ -40,10 +42,12 @@ import { CUT, CUTOUT_PATTERNS } from './cutout.js';
 import { FIN } from './fins/config.js';
 import { buildPad, PAD } from './fins/pad.js';
 import { bedContact, forgetSeated, seatedPartTris, seatingOf } from './fins/seating.js';
+import { braceTallWalls } from './fins/tall.js';
 import { lastResortWalls } from './fins/shortwalls.js';
 import { fillCoverage } from './fins/fill.js';
 import { buildPerpFins, PERP, propServesPatch, unservedAfterWedges, wedgeVeto } from './fins/wedges.js';
 import { judgeDownhill } from './fins/downhill.js';
+import { bends } from './prop/curved.js';
 import { applyNozzle, applyWallLines } from './nozzle.js';
 
 // Moved into web/fins/ (one module per concern); re-exported here so every
@@ -81,6 +85,9 @@ function coverPitch(coverage) {
  * Unknown or non-finite entries are ignored, and calling this with nothing leaves the
  * defaults alone -- an old caller that doesn't pass tunables behaves exactly as before.
  */
+// the FDM foot clearance, restored when the tine direction goes back to horizontal
+const FOOT_GAP = PROP.footGap;
+
 export function applyTunables(t) {
   if (!t) return;
   const set = (obj, key, v) => { if (Number.isFinite(v)) obj[key] = v; };
@@ -100,6 +107,14 @@ export function applyTunables(t) {
   if (CUTOUT_PATTERNS.includes(t.cutout)) CUT.pattern = t.cutout;
   // So is the interface crest's mode (GitHub #21, prop/crest.js).
   if ([false, 'flat', 'all'].includes(t.iface)) PROP.iface = t.iface;
+  // And the tine direction (#309): 'vertical' lays resin pins (prop/pins.js).
+  // A wall standing on the part welds its foot there too: resin builds the wall from
+  // the part outward, so a foot `footGap` off the part would start as a floating island.
+  if (['horizontal', 'vertical'].includes(t.tineDir)) {
+    PROP.tineDir = t.tineDir;
+    PROP.footGap = t.tineDir === 'vertical' ? 0 : FOOT_GAP;
+  }
+  if (Number.isFinite(t.pinDepth)) PROP.pinDepth = Math.max(0.05, Math.min(PROP.pinDepthMax, t.pinDepth));
   // And the nozzle and wall lines, which scale the support widths (nozzle.js).
   if (t.nozzle !== undefined) applyNozzle(t.nozzle);
   if (t.wallLines !== undefined) applyWallLines(t.wallLines);
@@ -120,6 +135,9 @@ export function applyTunables(t) {
  */
 export function buildFins(topo, result, rot, opts = {}) {
   const built = buildFinsAndBraces(topo, result, rot, opts);
+  // Tall walls get face ribs, last, around everything placed (fins/tall.js). Draw
+  // ribs its own walls on the page (draw.js braceTall).
+  if (opts.mode !== 'draw' && opts.tallRibs !== false) braceTallWalls(topo, result, rot, built);
   crestPart(null);   // the crest's part is only for this build (a Worker keeps no mesh)
   forgetSeated(topo);   // nor the seated part: a page building inline would hold it
   // A piece of the part that starts in mid-air (a cut clean through, a loose
@@ -179,7 +197,7 @@ function withFill(topo, result, rot, opts, auto) {
   const fins = props.map((q) => ({
     height: q.height, length: q.span, tines: q.tines, rows: 0, stilt: 0, lean: 0, bearing: 0, site: null,
     id: wid++, kind: 'prop', fill: true, triRanges: q.triRanges, line: q.line, span: q.span,
-    ...(q.joined ? { joined: true } : {}),
+    ...(q.joined ? { joined: true } : {}), ...(q.braces ? { braces: q.braces } : {}),
   }));
   const withTines = opts.tines !== false;
   return {
@@ -190,7 +208,7 @@ function withFill(topo, result, rot, opts, auto) {
     tines: (auto.tines ?? 0) + f.tines,
     braceCount: (auto.braceCount ?? 0) + (withTines ? fins.length : 0),
     propCount: (auto.propCount ?? 0) + (withTines ? 0 : fins.length),
-    fill: { walls: f.stats.walls, joined: f.stats.joined ?? 0, ribs: f.stats.ribs, ties: f.stats.ties, tries: f.stats.tries, checks: f.stats.checks, capped: f.stats.capped, refused: f.stats.refused,
+    fill: { walls: f.stats.walls, rows: f.stats.rows ?? 0, rowsLost: f.stats.rowsLost ?? 0, rowBuilds: f.stats.rowBuilds ?? 0, joined: f.stats.joined ?? 0, ribs: f.stats.ribs, ties: f.stats.ties, tries: f.stats.tries, checks: f.stats.checks, capped: f.stats.capped, refused: f.stats.refused,
             bareBefore: f.stats.startArea, unservedArea: f.unserved.area, unservedPts: f.unserved.pts },
   };
 }
@@ -222,6 +240,8 @@ function buildFinsCore(topo, result, rot, opts = {}) {
     // (`raster: false` is the tests' normal-pass-alone switch: no races at all.)
     if (opts.downhill === undefined) {
       if (opts.raster === false) return buildFinsCore(topo, result, rot, { ...opts, downhill: false });
+      // Curved walls (prop/curved.js): ticked, the curve is forced -- no judge
+      if (opts.curvedWalls === true) return buildFinsCore(topo, result, rot, { ...opts, downhill: true });
       return judgeDownhill(topo, result, rot, (downhill) => buildFinsCore(topo, result, rot, { ...opts, downhill }));
     }
     const withTines = opts.tines ?? true;
@@ -330,7 +350,18 @@ function buildFinsCore(topo, result, rot, opts = {}) {
     // on a point-seated part with the pad off, which gets no walls at all (above).
     // (`lastResort: false` is the tests' Auto baseline switch; it doesn't turn the fill off)
     const noWalls = base.seating?.kind === 'point' && !base.pad;
-    return mode === 'full' && !noWalls ? withFill(topo, result, rot, { ...opts, tines: withTines, coverage }, auto) : auto;
+    if (mode === 'full' && !noWalls) return withFill(topo, result, rot, { ...opts, tines: withTines, coverage }, auto);
+    // Curved walls in Auto (prop/curved.js): a forced curve can leave overhang the
+    // straight walls held, so the fill pass runs under the regions a curve won --
+    // there only, rows off. Its numbers are its own (`curvedFill`): the readout's Full
+    // coverage lines are Full's, but the red it couldn't reach is said all the same.
+    const curved = new Set(auto.props.filter((q) => q.downhill && bends([q])).map((q) => q.region));
+    if (mode === 'auto' && opts.curvedWalls === true && curved.size && !noWalls) {
+      const f = withFill(topo, result, rot, { ...opts, tines: withTines, coverage, longWalls: false, fillRegions: curved }, auto);
+      return { ...f, fill: undefined,
+               curvedFill: { walls: f.fill.walls, unservedArea: f.fill.unservedArea, capped: f.fill.capped } };
+    }
+    return auto;
   }
 
   // Prop (and any other mode) is its own support, built by its own module -- a

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSettings } from '../../resources/printfins/settings.mjs';
-import { OPTIONS_SCHEMA, optionsFromDialog } from '../../resources/printfins/vendor/plugins/shared/engine/fins_entry.js';
+import { optionsFromDialog } from '../../resources/printfins/vendor/plugins/shared/engine/fins_entry.js';
+import { FDM_SCHEMA as OPTIONS_SCHEMA } from '../../resources/printfins/schema.mjs';
 import { generate } from '../../resources/printfins/adapter.mjs';
 
 // Small DOM double for schema/transport tests. Native WebView rendering and
@@ -32,6 +33,8 @@ function setup() {
 test('dialog controls use every editable upstream default, range, step and choice', () => {
     const { read, control } = setup();
     assert.equal(control('layerHeight'), undefined);
+    assert.equal(control('tineDir'), undefined);
+    assert.equal(control('pinDepth'), undefined);
     for (const option of OPTIONS_SCHEMA.options.filter(o => o.hostSupplied !== 'slicer')) {
         const element = control(option.key);
         assert.ok(element, option.key);
