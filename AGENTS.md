@@ -1,30 +1,21 @@
-# Project rules
+# BambuStudio + PrintFins — agent instructions
 
-These rules apply to all agent work in this public BambuStudio + PrintFins repository.
+Applies to all agent work in this repository.
 
-1. **Git safety:** Never directly modify `master` or `integration`. Use dedicated feature, fix, maintenance, or update branches. Never merge, force-push, release, or discard work without authorization. Maintainer approval is required before merging into protected branches.
+1. **Git:** `integration` is the approved development baseline; preserve `master`. Never edit either directly. Use isolated feature/fix branches or worktrees; no force-push, merge, release, or discarded work without approval.
 
-2. **Stable baseline:** `integration` represents the last approved working development state. Preserve rollback through Git history, tags, and releases.
+2. **Baseline:** Preserve rollback via Git history, tags, and releases. Keep experiments separate from approved integration changes.
 
-3. **Code quality:** Prefer minimal, focused, maintainable changes. Follow existing conventions. Avoid unnecessary abstractions, dependencies, refactoring, and AI-generated boilerplate.
+3. **Code:** Follow existing conventions. Prefer minimal, focused, maintainable changes over speculative refactoring or dependencies.
 
-4. **Upstream compatibility:** Minimize divergence from `bambulab/BambuStudio` and `gittrahan/support-fins`. Keep the integration modular without prematurely committing to a specific architecture. Handle upstream updates separately and verify compatibility.
+4. **Upstream:** Minimize divergence from `bambulab/BambuStudio` and `gittrahan/support-fins`. Keep integration code separate from the pinned, unchanged `resources/printfins/vendor/` snapshot. Preserve source hashes, licenses (AGPL/MIT), attribution, and provenance; review upstream updates separately.
 
-5. **Verification:** Preserve existing functionality. Perform relevant tests, distinguish verified results from assumptions, and never claim unexecuted tests passed.
+5. **Tests:** Run checks relevant to each change. PrintFins CI uses `python scripts/printfins/check-snapshot.py`, `node --test tests/printfins/*.test.mjs`, and `python -m unittest discover -s tests/printfins -p 'test_*.py' -v`. Report executed, failed, and unavailable checks accurately; never claim an unrun test or build passed.
 
-6. **Community:** Keep changes understandable, reviewable, and appropriately documented. Respect upstream licenses and attribution.
+6. **Native behavior:** For changes to the Bambu UI, slicer, presets, or 3MF, verify relevant behavior with a Windows x64 build/smoke test when feasible. Source tests alone do not prove slicer/printer behavior.
 
-7. **Agent discipline:** Stay within the requested scope. Do not perform unrelated changes. Report modifications, tests, and limitations concisely.
+7. **Execution:** Inspect relevant code first, use targeted searches, and reuse verified context. Stay within scope, make small testable changes, and report results and blockers concisely.
 
-8. **Checkpoint discipline:** Never commit, push, create releases,
-or merge without explicit maintainer authorization. Before an
-approved checkpoint, verify the active branch, review all changes,
-inspect the staged file list, and run `git diff --cached --check`.
-Commit only the reviewed and authorized scope.
+8. **Checkpoints:** Commits, pushes, PR publication, releases, and merges require explicit maintainer approval. Before an approved checkpoint, verify branch/base, inspect staged paths, and run `git diff --cached --check`.
 
-9. **Staging, privacy, and provenance:** Stage files explicitly;
-never use `git add .` or `git add -A`. Exclude generated build
-artifacts, runtime logs, local profiles, credentials, personal
-filesystem paths, and unrelated files. Preserve third-party
-licenses, attribution, and reproducible source provenance.
-Verify vendored source snapshots against their manifest when changed.
+9. **Privacy and staging:** Stage explicit files only; never use `git add .` or `git add -A`. Exclude credentials, personal paths, local profiles, logs, build artifacts, and unrelated files. Preserve vendored source integrity and third-party licenses.
