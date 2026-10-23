@@ -3270,7 +3270,7 @@ void MainFrame::init_menubar_as_editor()
                 m_plater->deselect_all(); },
             "", nullptr, [this](){return can_deselect(); }, this);
         editMenu->AppendSeparator();
-        append_menu_item(editMenu, wxID_ANY, "PrintFins...",
+        append_menu_item(editMenu, wxID_ANY, _L("PrintFins..."),
             _L("Generate PrintFins for the selected model"),
             [this](wxCommandEvent &) { show_printfins_tool(*m_plater); },
             "", nullptr, [this]() { return m_tabpanel->GetSelection() == TabPosition::tp3DEditor &&

@@ -5447,7 +5447,7 @@ void PrintConfigDef::init_fff_params()
     def->enum_labels.push_back(L("tree(auto)"));
     def->enum_labels.push_back(L("normal(manual)"));
     def->enum_labels.push_back(L("tree(manual)"));
-    def->enum_labels.push_back("PrintFins");
+    def->enum_labels.push_back(L("PrintFins"));
     def->mode = comSimple;
     def->set_default_value(new ConfigOptionEnum<SupportType>(stNormalAuto));
 

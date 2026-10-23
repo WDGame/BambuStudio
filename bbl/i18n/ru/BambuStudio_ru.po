@@ -19751,3 +19751,136 @@ msgstr ""
 
 #~ msgid "Guide"
 #~ msgstr "Инстр."
+
+# PrintFins host integration
+msgid "Generation mode"
+msgstr "Режим создания"
+
+msgid "Auto places fins automatically. Full Coverage adds original fill walls under overhangs left by Auto. Wide-face coverage controls density separately."
+msgstr "Автоматический режим сам расставляет рёбра. Полное покрытие добавляет стенки заполнения под нависаниями, оставшимися после автоматического режима. Плотность на широких поверхностях настраивается отдельно."
+
+msgid "Full Coverage"
+msgstr "Полное покрытие"
+
+msgid "Overhang"
+msgstr "Угол нависания"
+
+msgid "Surface angle from the plate below which a face needs support."
+msgstr "Угол поверхности относительно стола, ниже которого поверхности требуется поддержка."
+
+msgid "Tines"
+msgstr "Зубцы"
+
+msgid "grip the part"
+msgstr "удерживают деталь"
+
+msgid "Tines fuse the support to the part so it grips instead of just propping. Off = plain breakaway wall."
+msgstr "Зубцы соединяют поддержку с деталью и удерживают её, а не просто подпирают. Выключено — обычная отламываемая стенка."
+
+msgid "Tine grip"
+msgstr "Плотность зубцов"
+
+msgid "light ⟶ firm"
+msgstr "слабо ⟶ прочно"
+
+msgid "How tightly to space the grip tines. Light = fewest marks (default), a per-wall floor keeps grip; Firm = dense comb / max grip for a tippy or tall part."
+msgstr "Плотность удерживающих зубцов. Слабо — меньше следов (по умолчанию), но каждая стенка сохраняет минимальное сцепление; прочно — плотная гребёнка для высокой или неустойчивой детали."
+
+msgid "Support gap"
+msgstr "Зазор поддержки"
+
+msgid "Clearance between a support top and the part. Bigger = cleaner surface / easier removal; too big stops holding the overhang. Default 0.2mm."
+msgstr "Зазор между верхом поддержки и деталью. Больший зазор облегчает снятие и сохраняет поверхность чище, но слишком большой перестаёт удерживать нависание. По умолчанию 0,2 мм."
+
+msgid "Bed pad"
+msgstr "Опора на столе"
+
+msgid "A tilted part rests on an edge and peels off the plate without a pad. Auto: Light, or Sure hold when the part meets the plate on a point or a small round foot. Light: one layer, 0.12mm off the part, peels off like a brim. Sure hold: thicker and tacked into the part, holds harder but is harder to remove."
+msgstr "Наклонённая деталь без опоры касается стола ребром и может оторваться. Авто выбирает лёгкую или усиленную опору для точечного либо малого круглого контакта. Лёгкая — один слой с зазором 0,12 мм, снимается как кайма. Усиленная — толще и соединена с деталью, держит лучше, но снимается труднее."
+
+msgid "Sure hold"
+msgstr "Усиленная"
+
+msgid "Sway braces"
+msgstr "Боковые распорки"
+
+msgid "tall parts"
+msgstr "для высоких деталей"
+
+msgid "Stand tapered buttress ribs against the upright sides of a tall part, tied on with tines all the way up, so it doesn't drift or wobble as it grows."
+msgstr "Добавляет сужающиеся распорки вдоль вертикальных сторон высокой детали и связывает их зубцами по всей высоте, чтобы деталь не смещалась и не раскачивалась при печати."
+
+msgid "Brace grip from"
+msgstr "Начало крепления распорки"
+
+msgid "mm up"
+msgstr "мм от стола"
+
+msgid "Height the brace tines start at. 0 = grip the whole height; raise it to tie on only above where the part starts to move."
+msgstr "Высота начала зубцов распорки. 0 — крепление по всей высоте; увеличь значение, чтобы крепить только выше места, где деталь начинает двигаться."
+
+msgid "Brace tine spacing"
+msgstr "Шаг зубцов распорки"
+
+msgid "Vertical distance between brace tines. Smaller = held tighter, more marks on the side. Default 6mm."
+msgstr "Вертикальное расстояние между зубцами распорки. Меньше — удержание прочнее, но следов на стенке больше. По умолчанию 6 мм."
+
+msgid "Brace depth"
+msgstr "Глубина распорки"
+
+msgid "% of height"
+msgstr "% высоты"
+
+msgid "How far the brace reaches out at the bed, as a share of its height. Deeper = stiffer, more plastic. Default 15%."
+msgstr "Вылет распорки у стола в долях её высоты. Большая глубина повышает жёсткость и расход пластика. По умолчанию 15%."
+
+msgid "Cutouts"
+msgstr "Вырезы"
+
+msgid "Cut holes through tall breakaway walls to save filament. The top edge that holds the part, the foot, and the wall's ends stay solid, and every hole has a pointed roof so it prints without bridging. Short walls stay solid."
+msgstr "Делает отверстия в высоких отламываемых стенках для экономии пластика. Верхняя кромка, основание и торцы остаются сплошными, а отверстия имеют заострённый верх и печатаются без мостов. Короткие стенки остаются сплошными."
+
+msgid "Diamond"
+msgstr "Ромб"
+
+msgid "Arch"
+msgstr "Арка"
+
+msgid "Lattice"
+msgstr "Решётка"
+
+msgid "Wide-face coverage"
+msgstr "Покрытие широкой поверхности"
+
+msgid "sparse ⟶ dense"
+msgstr "редко ⟶ плотно"
+
+msgid "How densely to line a WIDE overhang face with fins. The middle is the anti-sag default; drag LEFT for fewer fins (a small part can go down to one — the readout warns if a broad face then risks sagging), RIGHT for more support. Narrow parts are unaffected."
+msgstr "Плотность рёбер под широкой нависающей поверхностью. Среднее значение предотвращает провисание по умолчанию; влево — меньше рёбер, вправо — больше поддержки. Для узких деталей параметр не действует."
+
+msgid "Plate only"
+msgstr "Только от стола"
+
+msgid "Stand every support on the build plate, never on the part itself. An overhang with part under it is left unsupported, and the readout says how many."
+msgstr "Ставит все поддержки только на стол, а не на саму деталь. Нависания, под которыми находится деталь, останутся без поддержки; их количество будет показано."
+
+msgid "Generate PrintFins (Auto)"
+msgstr "Создать PrintFins (авто)"
+
+msgid "Generate PrintFins (Full Coverage)"
+msgstr "Создать PrintFins (полное покрытие)"
+
+msgid "Full Coverage: add original fill walls under overhangs left by Auto. Wide-face coverage controls density separately.\nSelect one complete model and generate before slicing."
+msgstr "Полное покрытие: добавляет стенки заполнения под нависаниями, оставшимися после автоматического режима. Плотность широких поверхностей настраивается отдельно.\nВыбери одну целую модель и создай рёбра до нарезки."
+
+msgid "Auto: select one complete model. Layer heights come from Bambu Studio.\nGenerate before slicing; fins become ordinary printable parts."
+msgstr "Авто: выбери одну целую модель. Высоты слоёв берутся из Bambu Studio.\nСоздай рёбра до нарезки — они станут обычными печатаемыми частями."
+
+msgid "Loading PrintFins settings..."
+msgstr "Загрузка настроек PrintFins…"
+
+msgid "Generating PrintFins... Cancel remains available."
+msgstr "Создание PrintFins… Отмену можно выполнить в любой момент."
+
+msgid "Generate fins for the selected model, or cancel to leave the project unchanged."
+msgstr "Создай рёбра для выбранной модели или отмени операцию, чтобы не изменять проект."
