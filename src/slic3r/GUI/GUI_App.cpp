@@ -376,15 +376,15 @@ public:
         memDc.SetTextForeground(StateColor::darkModeColorFor(wxColor(134, 134, 134)));
         memDc.DrawLabel(m_constant_text.version, version_rect, wxALIGN_LEFT | wxALIGN_BOTTOM);
 
-#if BBL_INTERNAL_TESTING
-        wxString versionText = BBL_INTERNAL_TESTING == 1 ? _L("Internal Version") : _L("Beta Version");
-        wxSize text_rect = memDc.GetTextExtent(versionText);
-        int start_x = (title_rect.GetLeft() + version_rect.GetRight()) / 2 - text_rect.GetWidth();
-        int start_y = version_rect.GetBottom() + 10;
-        wxRect internal_sign_rect(wxPoint(start_x, start_y), wxSize(text_rect));
-        memDc.SetFont(m_constant_text.title_font);
-        memDc.DrawLabel(versionText, internal_sign_rect, wxALIGN_TOP | wxALIGN_LEFT);
-#endif
+        // Permanent fork branding. Keep it independent from BBL_INTERNAL_TESTING
+        // so public release builds carry the same identity as development builds.
+        const wxString fork_brand = "by E-Core Team";
+        memDc.SetFont(m_constant_text.version_font);
+        const wxSize brand_size = memDc.GetTextExtent(fork_brand);
+        const int brand_x = title_rect.GetRight() - brand_size.GetWidth() + 1;
+        const int brand_y = version_rect.GetBottom() + FromDIP(10 * m_scale);
+        const wxRect brand_rect(wxPoint(brand_x, brand_y), brand_size);
+        memDc.DrawLabel(fork_brand, brand_rect, wxALIGN_TOP | wxALIGN_RIGHT);
 
         // load bitmap for logo
         BitmapCache bmp_cache;
