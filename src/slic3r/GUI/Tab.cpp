@@ -2133,6 +2133,39 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
         }
     }
 
+    if (opt_key == "make_overhang_printable" && boost::any_cast<bool>(value)) {
+        if (m_config->opt_enum<SupportType>("support_type") == stPrintFins) {
+            wxMessageBox(_L("Make overhangs printable cannot be combined with PrintFins because both features modify the model geometry. Choose one of them for this object."),
+                         _L("Incompatible settings"), wxOK | wxICON_WARNING, wxGetApp().plater());
+            DynamicPrintConfig new_conf = *m_config;
+            new_conf.set_key_value("make_overhang_printable", new ConfigOptionBool(false));
+            m_config_manipulation.apply(m_config, &new_conf);
+        } else {
+            wxString msg_text = _L("Enabling this option changes the sliced shape of the model. Check dimensions, holes and assembly interfaces in Preview before printing.");
+            msg_text += "\n\n" + _L("Are you sure you want to enable this option?");
+            MessageDialog dialog(
+                wxGetApp().plater(),
+                msg_text,
+                _L("Warning"), wxICON_WARNING | wxYES | wxNO);
+            dialog.SetButtonLabel(wxID_YES, _L("Enable"));
+            dialog.SetButtonLabel(wxID_NO, _L("Cancel"));
+            if (dialog.ShowModal() == wxID_NO) {
+                DynamicPrintConfig new_conf = *m_config;
+                new_conf.set_key_value("make_overhang_printable", new ConfigOptionBool(false));
+                m_config_manipulation.apply(m_config, &new_conf);
+            }
+        }
+    }
+
+    if (opt_key == "support_type" && m_config->opt_enum<SupportType>("support_type") == stPrintFins &&
+        m_config->opt_bool("make_overhang_printable")) {
+        wxMessageBox(_L("Make overhangs printable was disabled because it cannot be combined with PrintFins."),
+                     _L("Incompatible settings"), wxOK | wxICON_INFORMATION, wxGetApp().plater());
+        DynamicPrintConfig new_conf = *m_config;
+        new_conf.set_key_value("make_overhang_printable", new ConfigOptionBool(false));
+        m_config_manipulation.apply(m_config, &new_conf);
+    }
+
     if (opt_key == "enable_prime_tower") {
         auto timelapse_type = m_config->option<ConfigOptionEnum<TimelapseType>>("timelapse_type");
         bool timelapse_enabled = timelapse_type->value == TimelapseType::tlSmooth;
@@ -3274,6 +3307,9 @@ void TabPrint::build()
         optgroup->append_single_option_line("top_area_threshold","parameter/quality-advance-settings");
         optgroup->append_single_option_line("only_one_wall_first_layer","parameter/quality-advance-settings");
         optgroup->append_single_option_line("detect_overhang_wall","parameter/quality-advance-settings");
+        optgroup->append_single_option_line("make_overhang_printable");
+        optgroup->append_single_option_line("make_overhang_printable_angle");
+        optgroup->append_single_option_line("make_overhang_printable_hole_size");
         optgroup->append_single_option_line("smooth_speed_discontinuity_area","parameter/quality-advance-settings");
         optgroup->append_single_option_line("smooth_coefficient","parameter/quality-advance-settings");
         optgroup->append_single_option_line("reduce_crossing_wall","parameter/quality-advance-settings");

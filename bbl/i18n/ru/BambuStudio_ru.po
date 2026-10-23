@@ -14808,6 +14808,39 @@ msgstr "Обнаруживать нависающие периметры"
 msgid "Detect the overhang percentage relative to line width and use different speed to print. For 100 percent overhang, bridge speed is used."
 msgstr "Определяет процент нависания относительно ширины линии и использует разную скорость печати. Для 100%-го свеса используется скорость печати мостов."
 
+msgid "Make overhangs printable"
+msgstr "Деформировать модель для печати без поддержек"
+
+msgid "Modify the geometry to print overhangs without support material."
+msgstr "Изменяет геометрию модели, чтобы печатать нависающие части без поддержек."
+
+msgid "Make overhangs printable - Maximum angle"
+msgstr "Допустимый угол нависания"
+
+msgid "Maximum angle of overhangs to allow after making steeper overhangs printable. 90 degrees will not change the model, while 0 degrees will replace all overhangs with conical material."
+msgstr "Максимально допустимый угол нависания. Более крутые нависания будут подгоняться под указанный угол. Значение 90° не изменяет модель, а 0° проецирует нависания вниз конической геометрией."
+
+msgid "Make overhangs printable - Hole area"
+msgstr "Допустимая площадь отверстий"
+
+msgid "Maximum area of a hole in the base of the model before it is filled by conical material. A value of 0 will fill all holes in the model base."
+msgstr "Максимальная площадь отверстия в основании модели, которое следует сохранить при построении конической геометрии. Значение 0 заполняет все отверстия в основании."
+
+msgid "Enabling this option changes the sliced shape of the model. Check dimensions, holes and assembly interfaces in Preview before printing."
+msgstr "Эта функция изменяет форму модели при нарезке. Перед печатью проверь размеры, отверстия и сопрягаемые поверхности в режиме предварительного просмотра."
+
+msgid "Are you sure you want to enable this option?"
+msgstr "Включить эту функцию?"
+
+msgid "Make overhangs printable cannot be combined with PrintFins because both features modify the model geometry. Choose one of them for this object."
+msgstr "Деформацию нависаний нельзя использовать вместе с PrintFins: обе функции изменяют геометрию модели. Выбери для этого объекта одну из них."
+
+msgid "Make overhangs printable was disabled because it cannot be combined with PrintFins."
+msgstr "Деформация нависаний отключена, поскольку её нельзя использовать вместе с PrintFins."
+
+msgid "Incompatible settings"
+msgstr "Несовместимые настройки"
+
 # ??? Область сглаживания неоднородной скорости, Область плавного изменения скорости, Плавное сглаживание участков с резким изменением скорости
 msgid "Smooth speed discontinuity area"
 msgstr "Область сглаживания скорости"

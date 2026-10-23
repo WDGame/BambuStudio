@@ -187,6 +187,7 @@ class PrintFinsDialog final : public wxDialog {
             fin_geometry.merge(posed);
             auto *volume = prepared.add_volume(std::move(mesh), ModelVolumeType::MODEL_PART, false);
             volume->name = "PrintFins " + piece.at("kind").get<std::string>() + " " + piece.at("id").get<std::string>();
+            volume->config.set_key_value("make_overhang_printable", new ConfigOptionBool(false));
             volume->calculate_convex_hull();
         }
         if (std::find(used.begin(), used.end(), false) != used.end())
@@ -529,6 +530,8 @@ public:
                 effective.apply(plater.model().objects[index]->config.get());
                 if (effective.opt_enum<SupportType>("support_type") != stPrintFins || !effective.opt_bool("enable_support"))
                     throw std::runtime_error("Enable the PrintFins support type for the selected model first.");
+                if (effective.opt_bool("make_overhang_printable"))
+                    throw std::runtime_error("Disable Make overhangs printable before generating PrintFins.");
                 if (effective.opt_int("raft_layers") != 0)
                     throw std::runtime_error("Set Bambu raft layers to zero before generating PrintFins.");
                 const Json values = read();
