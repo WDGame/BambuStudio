@@ -1,5 +1,6 @@
 #include "libslic3r/Technologies.hpp"
 #include "GUI_App.hpp"
+#include "ForkVersion.hpp"
 #include "GUI_Init.hpp"
 #include "GUI_ObjectList.hpp"
 #include "GUI_Factories.hpp"
@@ -3116,7 +3117,8 @@ bool GUI_App::on_init_inner()
     }
 #endif
 
-    BOOST_LOG_TRIVIAL(info) << boost::format("gui mode, Current BambuStudio Version %1%")%SLIC3R_VERSION << ", BuildTime " << SLIC3R_BUILD_TIME;
+    BOOST_LOG_TRIVIAL(info) << boost::format("gui mode, Current BambuStudio Version %1%")%SLIC3R_VERSION
+                            << ", E-Core fork " << ForkVersion::display << ", BuildTime " << SLIC3R_BUILD_TIME;
 
 #if !BBL_RELEASE_TO_PUBLIC
     BOOST_LOG_TRIVIAL(info) << boost::format("Build Version %1%")%SLIC3R_COMPILE_VERSION;
@@ -5648,73 +5650,52 @@ bool GUI_App::check_send_print_version_policy()
 
 void GUI_App::check_new_version(bool show_tips, int by_user)
 {
-    std::string platform = "windows";
-
-#ifdef __WINDOWS__
-    platform = "windows";
-#endif
-#ifdef __APPLE__
-    platform = "macos";
-#endif
-#ifdef __LINUX__
-    platform = "linux";
-#endif
-    std::string query_params = (boost::format("?name=slicer&version=%1%&guide_version=%2%")
-        % VersionInfo::convert_full_version(SLIC3R_VERSION)
-        % VersionInfo::convert_full_version("0.0.0.1")
-        ).str();
-
-    std::string url = get_http_url(app_config->get_country_code()) + query_params;
+    // E-Core builds follow only published stable releases of this fork. This
+    // deliberately avoids mixing the official Bambu channel with fork builds.
+    const std::string url = std::string("https://api.github.com/repos/") + ForkVersion::repository + "/releases";
     Slic3r::Http http = Slic3r::Http::get(url);
 
     http.header("accept", "application/json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
         .timeout_connect(TIMEOUT_CONNECT)
         .timeout_max(TIMEOUT_RESPONSE)
         .on_complete([this, show_tips, by_user](std::string body, unsigned) {
         try {
-            json j = json::parse(body);
-            if (j.contains("message")) {
-                if (j["message"].get<std::string>() == "success") {
-                    if (j.contains("software")) {
-                        if (j["software"].empty()) {
-                            // Same reasoning as in check_update(): suppress the toast when
-                            // the beta channel is enabled so it cannot contradict the beta
-                            // release dialog raised by the async GitHub check below.
-                            if (show_tips && app_config->get("enable_beta_version_update") != "true") {
-                                this->no_new_version();
-                            } else {
-                                check_beta_version(show_tips);
-                            }
-                        }
-                        else {
-                            if (j["software"].contains("url")
-                                && j["software"].contains("version")
-                                && j["software"].contains("description")) {
-                                version_info.url = j["software"]["url"].get<std::string>();
-                                version_info.version_str = j["software"]["version"].get<std::string>();
-                                version_info.description = j["software"]["description"].get<std::string>();
+            const json releases = json::parse(body);
+            const std::regex tag_regex(R"(^v(\d{2}\.\d{2}\.\d{2}\.\d{2})-ecore\.(\d+)$)");
+            for (const auto &release : releases) {
+                if (release.value("draft", true) || release.value("prerelease", true)) continue;
+                const std::string tag = release.value("tag_name", "");
+                std::smatch match;
+                if (!std::regex_match(tag, match, tag_regex)) continue;
+                const std::string remote_upstream = match[1].str();
+                const int remote_revision = std::stoi(match[2].str());
+                const auto current = Semver::parse(ForkVersion::upstream_version);
+                const auto remote = Semver::parse(remote_upstream);
+                const bool newer = current && remote &&
+                    (*remote > *current || (*remote == *current && remote_revision > ForkVersion::revision));
 
-                                wxGetApp().app_config->set_str("app", "cloud_software_url", version_info.url);
-                            }
-                            if (j["software"].contains("force_update")) {
-                                version_info.force_upgrade = j["software"]["force_update"].get<bool>();
-                            }
-                            CallAfter([this, show_tips, by_user](){
-                                this->check_update(show_tips, by_user);
-                            });
-                        }
-                    }
-                }
+                version_info.version_str = tag.substr(1);
+                version_info.url = release.value("html_url", "");
+                version_info.description = release.value("body", "");
+                version_info.force_upgrade = false;
+                app_config->set_str("app", "cloud_software_url", version_info.url);
+                CallAfter([this, show_tips, by_user, newer] {
+                    if (newer && !version_info.url.empty()) request_new_version(by_user);
+                    else if (show_tips) no_new_version();
+                });
+                return;
             }
+            CallAfter([this, show_tips] { if (show_tips) no_new_version(); });
         }
-        catch (...) {
-            ;
+        catch (const std::exception &error) {
+            BOOST_LOG_TRIVIAL(error) << "E-Core release check failed: " << error.what();
         }
-            })
+        })
         .on_error([this](std::string body, std::string error, unsigned int status) {
             handle_http_error(status, body);
-            BOOST_LOG_TRIVIAL(error) << "check new version error" << body;
-    }).perform();
+            BOOST_LOG_TRIVIAL(error) << "E-Core release check error: " << error << " status=" << status;
+        }).perform();
 }
 
 void GUI_App::check_beta_version(bool show_tips_when_no_beta)

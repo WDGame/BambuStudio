@@ -1,0 +1,97 @@
+name: E-Core upstream sync
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ecore-upstream-sync
+  cancel-in-progress: true
+
+jobs:
+  detect-and-propose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: integration
+          fetch-depth: 0
+
+      - name: Read official releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --paginate repos/bambulab/BambuStudio/releases > "$RUNNER_TEMP/releases.json"
+
+      - name: Select newest stable release
+        id: release
+        run: python scripts/printfins/upstream-release.py --releases-json "$RUNNER_TEMP/releases.json" --github-output "$GITHUB_OUTPUT"
+
+      - name: Stop when integration is current
+        if: steps.release.outputs.update_available != 'true'
+        run: echo "integration already tracks ${{ steps.release.outputs.current_tag }}"
+
+      - name: Merge stable upstream into an update branch
+        if: steps.release.outputs.update_available == 'true'
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.latest_tag }}
+          VERSION: ${{ steps.release.outputs.latest_version }}
+        run: |
+          set -euo pipefail
+          branch="update/upstream-${VERSION}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "branch=$branch" >> "$GITHUB_OUTPUT"
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add official https://github.com/bambulab/BambuStudio.git
+          git fetch --no-tags official "refs/tags/${TAG}:refs/tags/${TAG}"
+          git switch -c "$branch"
+          if ! git merge --no-ff --no-edit "$TAG"; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            git merge --abort
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Upstream ${TAG} requires manual adaptation" \
+              --body "Automatic merge into integration stopped safely. Conflicting files:\n\n\`\`\`\n${conflicts}\n\`\`\`\n\nOfficial release: ${{ steps.release.outputs.release_url }}"
+            exit 1
+          fi
+          sha="$(git rev-list -n1 "$TAG")"
+          python - "$TAG" "$VERSION" "$sha" <<'PY'
+          import json, pathlib, sys
+          path = pathlib.Path('printfins-fork.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          data.update(upstream_tag=sys.argv[1], upstream_version=sys.argv[2], upstream_commit=sys.argv[3],
+                      fork_revision=1, fork_version=f'{sys.argv[2]}-ecore.1')
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          header = pathlib.Path('src/slic3r/GUI/ForkVersion.hpp')
+          text = header.read_text(encoding='utf-8')
+          import re
+          text = re.sub(r'upstream_version = "[^"]+"', f'upstream_version = "{sys.argv[2]}"', text)
+          text = re.sub(r'revision = \d+', 'revision = 1', text)
+          text = re.sub(r'display = "[^"]+"', f'display = "{sys.argv[2]}-ecore.1"', text)
+          header.write_text(text, encoding='utf-8')
+          PY
+          git add printfins-fork.json src/slic3r/GUI/ForkVersion.hpp
+          git commit -m "chore(release): track upstream ${TAG}"
+          git push -u origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "existing=false" >> "$GITHUB_OUTPUT"
+
+      - name: Open update pull request
+        if: steps.release.outputs.update_available == 'true' && steps.merge.outputs.existing != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create --base integration --head "${{ steps.merge.outputs.branch }}" \
+            --title "Update to stable Bambu Studio ${{ steps.release.outputs.latest_tag }}" \
+            --body "Automated stable-upstream update. Publication remains blocked until all tests and the Windows candidate build pass.\n\nOfficial release: ${{ steps.release.outputs.release_url }}"
