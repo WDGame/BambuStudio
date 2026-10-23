@@ -1,0 +1,83 @@
+name: E-Core Windows candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-ecore.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ecore-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quick-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/printfins/check-snapshot.py
+      - run: node --test tests/printfins/*.test.mjs
+      - run: python -m unittest discover -s tests/printfins -p 'test_*.py' -v
+      - name: Validate release metadata
+        run: |
+          python -m json.tool printfins-fork.json >/dev/null
+          git diff --check
+
+  build-windows:
+    needs: quick-checks
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: windows-latest
+      arch: x64
+      build-deps-only: false
+    secrets: inherit
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: BambuStudio_Windows_*_portable
+          merge-multiple: true
+          path: release
+      - name: Create checksums and release manifest
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          archive="$(find release -maxdepth 1 -name '*.zip' -type f -print -quit)"
+          test -n "$archive"
+          sha256sum "$archive" | sed 's#  release/#  #' > release/SHA256SUMS.txt
+          size="$(stat -c %s "$archive")"
+          sha="$(sha256sum "$archive" | cut -d' ' -f1)"
+          name="$(basename "$archive")"
+          python - "$TAG" "$name" "$size" "$sha" <<'PY'
+          import json, pathlib, sys
+          state = json.loads(pathlib.Path('printfins-fork.json').read_text(encoding='utf-8'))
+          manifest = {"schema": 1, "channel": "stable", "tag": sys.argv[1],
+                      "upstream_version": state["upstream_version"], "fork_revision": state["fork_revision"],
+                      "asset": sys.argv[2], "size": int(sys.argv[3]), "sha256": sys.argv[4],
+                      "commit": "${{ github.sha }}"}
+          pathlib.Path('release/latest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          PY
+      - name: Publish stable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" release/* \
+            --verify-tag --title "Bambu Studio E-Core ${{ github.ref_name }}" \
+            --notes "Stable E-Core build based on Bambu Studio $(python -c 'import json; print(json.load(open(\"printfins-fork.json\"))[\"upstream_version\"])'). Includes PrintFins, Make overhangs printable, Russian localization, and E-Core branding."
