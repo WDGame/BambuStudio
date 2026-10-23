@@ -14326,6 +14326,39 @@ msgstr ""
 msgid "Detect the overhang percentage relative to line width and use different speed to print. For 100 percent overhang, bridge speed is used."
 msgstr ""
 
+msgid "Make overhangs printable"
+msgstr ""
+
+msgid "Modify the geometry to print overhangs without support material."
+msgstr ""
+
+msgid "Make overhangs printable - Maximum angle"
+msgstr ""
+
+msgid "Maximum angle of overhangs to allow after making steeper overhangs printable. 90 degrees will not change the model, while 0 degrees will replace all overhangs with conical material."
+msgstr ""
+
+msgid "Make overhangs printable - Hole area"
+msgstr ""
+
+msgid "Maximum area of a hole in the base of the model before it is filled by conical material. A value of 0 will fill all holes in the model base."
+msgstr ""
+
+msgid "Enabling this option changes the sliced shape of the model. Check dimensions, holes and assembly interfaces in Preview before printing."
+msgstr ""
+
+msgid "Are you sure you want to enable this option?"
+msgstr ""
+
+msgid "Make overhangs printable cannot be combined with PrintFins because both features modify the model geometry. Choose one of them for this object."
+msgstr ""
+
+msgid "Make overhangs printable was disabled because it cannot be combined with PrintFins."
+msgstr ""
+
+msgid "Incompatible settings"
+msgstr ""
+
 msgid "Smooth speed discontinuity area"
 msgstr ""
 

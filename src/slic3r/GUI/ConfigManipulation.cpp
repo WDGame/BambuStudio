@@ -866,6 +866,10 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
                     "inner_wall_speed", "outer_wall_speed","small_perimeter_speed", "small_perimeter_threshold" })
         toggle_field(el, have_perimeters);
 
+    const bool make_overhang_printable = config->opt_bool("make_overhang_printable");
+    toggle_line("make_overhang_printable_angle", make_overhang_printable);
+    toggle_line("make_overhang_printable_hole_size", make_overhang_printable);
+
     SeamPosition seam_pos = config->option<ConfigOptionEnum<SeamPosition>>("seam_position")->value;
     toggle_line("seam_placement_away_from_overhangs", seam_pos == SeamPosition::spAligned || seam_pos == SeamPosition::spRear);
 

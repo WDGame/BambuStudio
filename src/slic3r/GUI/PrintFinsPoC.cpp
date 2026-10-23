@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 #include <boost/log/trivial.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <wx/checkbox.h>
@@ -36,13 +37,74 @@ namespace Slic3r::GUI {
 namespace {
 using Json = nlohmann::json;
 
+Json localized_settings_schema(Json schema)
+{
+    for (auto &spec : schema.at("options")) {
+        const std::string key = spec.at("key").get<std::string>();
+        auto set = [&spec](const char *field, const std::string &value) { spec[field] = value; };
+        if (key == "mode") {
+            set("label", _u8L("Generation mode"));
+            set("tooltip", _u8L("Auto places fins automatically. Full Coverage adds original fill walls under overhangs left by Auto. Wide-face coverage controls density separately."));
+            spec["choices"][0]["label"] = _u8L("Auto");
+            spec["choices"][1]["label"] = _u8L("Full Coverage");
+        } else if (key == "threshold") {
+            set("label", _u8L("Overhang"));
+            set("tooltip", _u8L("Surface angle from the plate below which a face needs support."));
+        } else if (key == "tines") {
+            set("label", _u8L("Tines"));
+            set("hint", _u8L("grip the part"));
+            set("tooltip", _u8L("Tines fuse the support to the part so it grips instead of just propping. Off = plain breakaway wall."));
+        } else if (key == "tineDensity") {
+            set("label", _u8L("Tine grip"));
+            set("hint", _u8L("light ⟶ firm"));
+            set("tooltip", _u8L("How tightly to space the grip tines. Light = fewest marks (default), a per-wall floor keeps grip; Firm = dense comb / max grip for a tippy or tall part."));
+        } else if (key == "gap") {
+            set("label", _u8L("Support gap"));
+            set("tooltip", _u8L("Clearance between a support top and the part. Bigger = cleaner surface / easier removal; too big stops holding the overhang. Default 0.2mm."));
+        } else if (key == "padStyle") {
+            set("label", _u8L("Bed pad"));
+            set("tooltip", _u8L("A tilted part rests on an edge and peels off the plate without a pad. Auto: Light, or Sure hold when the part meets the plate on a point or a small round foot. Light: one layer, 0.12mm off the part, peels off like a brim. Sure hold: thicker and tacked into the part, holds harder but is harder to remove."));
+            const std::array<std::string, 4> labels{_u8L("Off"), _u8L("Auto"), _u8L("Light"), _u8L("Sure hold")};
+            for (size_t i = 0; i < labels.size(); ++i) spec["choices"][i]["label"] = labels[i];
+        } else if (key == "sway.on") {
+            set("label", _u8L("Sway braces"));
+            set("hint", _u8L("tall parts"));
+            set("tooltip", _u8L("Stand tapered buttress ribs against the upright sides of a tall part, tied on with tines all the way up, so it doesn't drift or wobble as it grows."));
+        } else if (key == "sway.gripFrom") {
+            set("label", _u8L("Brace grip from"));
+            set("hint", _u8L("mm up"));
+            set("tooltip", _u8L("Height the brace tines start at. 0 = grip the whole height; raise it to tie on only above where the part starts to move."));
+        } else if (key == "sway.tineSpacing") {
+            set("label", _u8L("Brace tine spacing"));
+            set("tooltip", _u8L("Vertical distance between brace tines. Smaller = held tighter, more marks on the side. Default 6mm."));
+        } else if (key == "sway.reach") {
+            set("label", _u8L("Brace depth"));
+            set("hint", _u8L("% of height"));
+            set("tooltip", _u8L("How far the brace reaches out at the bed, as a share of its height. Deeper = stiffer, more plastic. Default 15%."));
+        } else if (key == "cutout") {
+            set("label", _u8L("Cutouts"));
+            set("tooltip", _u8L("Cut holes through tall breakaway walls to save filament. The top edge that holds the part, the foot, and the wall's ends stay solid, and every hole has a pointed roof so it prints without bridging. Short walls stay solid."));
+            const std::array<std::string, 5> labels{_u8L("None"), _u8L("Diamond"), _u8L("Triangle"), _u8L("Arch"), _u8L("Lattice")};
+            for (size_t i = 0; i < labels.size(); ++i) spec["choices"][i]["label"] = labels[i];
+        } else if (key == "coverage") {
+            set("label", _u8L("Wide-face coverage"));
+            set("hint", _u8L("sparse ⟶ dense"));
+            set("tooltip", _u8L("How densely to line a WIDE overhang face with fins. The middle is the anti-sag default; drag LEFT for fewer fins (a small part can go down to one — the readout warns if a broad face then risks sagging), RIGHT for more support. Narrow parts are unaffected."));
+        } else if (key == "plateOnly") {
+            set("label", _u8L("Plate only"));
+            set("tooltip", _u8L("Stand every support on the build plate, never on the part itself. An overhang with part under it is left unsupported, and the readout says how many."));
+        }
+    }
+    return schema;
+}
+
 int selected_object(Plater &plater)
 {
     const auto &selection = plater.get_selection();
     const int index = selection.get_object_idx();
     if ((!selection.is_single_full_instance() && !selection.is_single_full_object()) ||
         index < 0 || size_t(index) >= plater.model().objects.size())
-        throw std::runtime_error("Select one complete model on the plate before using PrintFins.");
+        throw std::runtime_error(_u8L("Select one complete model on the plate before using PrintFins."));
     return index;
 }
 
@@ -53,28 +115,28 @@ Json layer_heights(Plater &plater, const ModelObject &object)
     const double height = config.option<ConfigOptionFloat>("layer_height")->value;
     const double first = config.option<ConfigOptionFloat>("initial_layer_print_height")->value;
     if (!std::isfinite(height) || height <= 0 || !std::isfinite(first) || first <= 0)
-        throw std::runtime_error("PrintFins requires positive, constant layer heights.");
+        throw std::runtime_error(_u8L("PrintFins requires positive, constant layer heights."));
     return {{"layerHeight", height}, {"firstLayerHeight", first}};
 }
 
 Json posed_mesh(const ModelObject &object)
 {
     if (object.instances.size() != 1 || object.volumes.empty())
-        throw std::runtime_error("PrintFins supports one instance of a model with plain model parts.");
+        throw std::runtime_error(_u8L("PrintFins supports one instance of a model with plain model parts."));
     if (!object.layer_height_profile.empty() || !object.layer_config_ranges.empty())
-        throw std::runtime_error("Variable layer heights and height range modifiers are not supported by PrintFins.");
+        throw std::runtime_error(_u8L("Variable layer heights and height range modifiers are not supported by PrintFins."));
     Json positions = Json::array();
     for (const ModelVolume *volume : object.volumes) {
         if (volume->name.rfind("PrintFins ", 0) == 0)
-            throw std::runtime_error("This model already contains PrintFins. Undo or remove those parts explicitly before generating again.");
+            throw std::runtime_error(_u8L("This model already contains PrintFins. Undo or remove those parts explicitly before generating again."));
         if (!volume->is_model_part())
-            throw std::runtime_error("PrintFins does not support modifiers or negative/support volumes.");
+            throw std::runtime_error(_u8L("PrintFins does not support modifiers or negative/support volumes."));
         const Transform3d matrix = object.instances.front()->get_matrix() * volume->get_matrix();
         if (!matrix.matrix().allFinite() || std::abs(matrix.linear().determinant()) < 1e-12)
             throw std::runtime_error("The model has an invalid or singular transform.");
         const auto &its = volume->mesh().its;
         if (its.indices.size() > (900000 - positions.size()) / 9)
-            throw std::runtime_error("PrintFins currently supports at most 100000 input triangles.");
+            throw std::runtime_error(_u8L("PrintFins currently supports at most 100000 input triangles."));
         for (const auto &face : its.indices) {
             for (int k = 0; k < 3; ++k) {
                 const int corner = matrix.linear().determinant() < 0 && k > 0 ? 3 - k : k;
@@ -84,7 +146,7 @@ Json posed_mesh(const ModelObject &object)
             }
         }
     }
-    if (positions.empty()) throw std::runtime_error("The selected model has no triangles.");
+    if (positions.empty()) throw std::runtime_error(_u8L("The selected model has no triangles."));
     return positions;
 }
 
@@ -142,7 +204,7 @@ class PrintFinsDialog final : public wxDialog {
         if (triangles.empty()) {
             m_finished = true;
             m_timeout.Stop();
-            wxMessageBox("PrintFins generated no geometry for this model and these settings. The project is unchanged.",
+            wxMessageBox(_L("PrintFins generated no geometry for this model and these settings. The project is unchanged."),
                          "PrintFins", wxOK | wxICON_INFORMATION, this);
             EndModal(wxID_CANCEL);
             return;
@@ -187,6 +249,7 @@ class PrintFinsDialog final : public wxDialog {
             fin_geometry.merge(posed);
             auto *volume = prepared.add_volume(std::move(mesh), ModelVolumeType::MODEL_PART, false);
             volume->name = "PrintFins " + piece.at("kind").get<std::string>() + " " + piece.at("id").get<std::string>();
+            volume->config.set_key_value("make_overhang_printable", new ConfigOptionBool(false));
             volume->calculate_convex_hull();
         }
         if (std::find(used.begin(), used.end(), false) != used.end())
@@ -206,7 +269,7 @@ class PrintFinsDialog final : public wxDialog {
         if (!prepared.instances.front()->get_matrix().matrix().isApprox(object.instances.front()->get_matrix().matrix(), 1e-9))
             throw std::runtime_error("Adding PrintFins would move the model; result discarded.");
 
-        m_plater.take_snapshot("Generate PrintFins");
+        m_plater.take_snapshot(_u8L("Generate PrintFins"));
         // Use Bambu's normal volume-copy path (meshes/hulls are shared), keeping
         // the original parts, settings and instance. One undo restores the input.
         try {
@@ -236,16 +299,17 @@ public:
         m_layer_heights = layer_heights(plater, object);
         Json values = options ? *options : Json::object();
         values.update(m_layer_heights); // Actual slicer heights always win.
-        m_request = {{"positions", posed_mesh(object)}, {"options", values}};
+        m_request = {{"positions", posed_mesh(object)}, {"options", values},
+                     {"uiLocale", into_u8(wxGetApp().current_language_code_safe())}};
         auto *layout = new wxBoxSizer(wxVERTICAL);
-        m_status = new wxStaticText(this, wxID_ANY, "Loading PrintFins settings...");
+        m_status = new wxStaticText(this, wxID_ANY, _L("Loading PrintFins settings..."));
         layout->Add(m_status, 0, wxALL | wxEXPAND, 12);
         SetSizer(layout);
         Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { cancel(); }, wxID_CANCEL);
         Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent &) { cancel(); });
         Bind(wxEVT_TIMER, [this](wxTimerEvent &) {
-            fail(m_busy ? "PrintFins engine timed out after 120 seconds. Close and try a simpler model."
-                        : "PrintFins settings could not be loaded. Check the WebView2 runtime and local resources.");
+            fail(m_busy ? _u8L("PrintFins engine timed out after 120 seconds. Close and try a simpler model.")
+                        : _u8L("PrintFins settings could not be loaded. Check the WebView2 runtime and local resources."));
         });
 #if defined(_WIN32) && wxUSE_WEBVIEW_EDGE
         m_web = WebView::CreateWebView(this, "about:blank", "PrintFins");
@@ -260,7 +324,7 @@ public:
                 BOOST_LOG_TRIVIAL(error) << "PrintFins WebView: url=" << event.GetURL().ToStdString()
                     << " code=" << event.GetInt() << " description=" << event.GetString().ToStdString()
                     << " mapped=" << m_mapped << " ready=" << m_ready;
-                fail("Cannot load the local PrintFins settings page.");
+                fail(_u8L("Cannot load the local PrintFins settings page."));
             });
             m_web->Bind(wxEVT_WEBVIEW_LOADED, [this](wxWebViewEvent &) {
                 if (m_mapped || m_finished) return;
@@ -292,13 +356,13 @@ public:
                             (m_native ? "document.getElementById('generate').click();" : "");
                         if (!WebView::RunScript(m_web, wxString::FromUTF8(script)))
                             throw std::runtime_error("Cannot initialize PrintFins settings.");
-                        if (!m_native) m_status->SetLabel("Generate fins for the selected model, or cancel to leave the project unchanged.");
+                        if (!m_native) m_status->SetLabel(_L("Generate fins for the selected model, or cancel to leave the project unchanged."));
                         m_status->Wrap(700);
                         Layout();
                     } else if (action == "computing" && m_ready && !m_busy) {
                         BOOST_LOG_TRIVIAL(info) << "PrintFins worker computing.";
                         m_busy = true;
-                        m_status->SetLabel("Generating PrintFins... Cancel remains available.");
+                        m_status->SetLabel(_L("Generating PrintFins... Cancel remains available."));
                         m_timeout.StartOnce(120000);
                     } else if (action == "error") {
                         throw std::runtime_error(message.value("error", "PrintFins page failed."));
@@ -311,10 +375,10 @@ public:
             m_web->LoadURL("about:blank");
             m_timeout.StartOnce(30000);
         } else {
-            CallAfter([this] { fail("Cannot create PrintFins WebView2. Check that WebView2 is installed."); });
+            CallAfter([this] { fail(_u8L("Cannot create PrintFins WebView2. Check that WebView2 is installed.")); });
         }
 #else
-        CallAfter([this] { fail("PrintFins currently requires Windows with WebView2."); });
+        CallAfter([this] { fail(_u8L("PrintFins currently requires Windows with WebView2.")); });
 #endif
         layout->Add(CreateButtonSizer(wxCANCEL), 0, wxALL | wxALIGN_RIGHT, 12);
         SetMinSize(m_native ? wxSize(540, 160) : wxSize(540, 460));
@@ -327,7 +391,7 @@ public:
 Json settings_schema()
 {
     std::ifstream stream(resources_dir() + "/printfins/vendor/plugins/shared/engine/options.json");
-    if (!stream) throw std::runtime_error("Cannot read the original PrintFins options schema.");
+    if (!stream) throw std::runtime_error(_u8L("Cannot read the original PrintFins options schema."));
     return Json::parse(stream);
 }
 
@@ -375,15 +439,15 @@ class NativePrintFinsSettings final : public wxPanel {
                 double displayed;
                 const bool in_range = number->CheckValid(false);
                 if (!entry.ToDouble(&displayed) || !std::isfinite(displayed))
-                    throw std::runtime_error("Enter a finite number for PrintFins: " + key);
-                if (!in_range) throw std::runtime_error("PrintFins setting outside the allowed range: " + key);
+                    throw std::runtime_error(_u8L("Enter a finite number for PrintFins: ") + key);
+                if (!in_range) throw std::runtime_error(_u8L("PrintFins setting outside the allowed range: ") + key);
                 const double value = displayed / (control.spec.value("percent", false) ? 100. : 1.);
                 PrintFinsSettings::validate(control.spec, value);
                 values[key] = value;
             }
             else {
                 const int choice = static_cast<wxChoice *>(control.input)->GetSelection();
-                if (choice < 0) throw std::runtime_error("Choose a valid PrintFins setting.");
+                if (choice < 0) throw std::runtime_error(_u8L("Choose a valid PrintFins setting."));
                 values[key] = control.spec.at("choices").at(choice).at("value");
             }
         }
@@ -425,7 +489,7 @@ public:
     NativePrintFinsSettings(wxWindow *parent, std::function<const DynamicPrintConfig &()> config,
                            std::function<DynamicPrintConfig()> preset,
                            std::function<void(const std::string &)> save) :
-        wxPanel(parent), m_schema(PrintFinsSettings::native_schema(settings_schema())),
+        wxPanel(parent), m_schema(localized_settings_schema(PrintFinsSettings::native_schema(settings_schema()))),
         m_config(std::move(config)), m_preset(std::move(preset)), m_save(std::move(save))
     {
         auto *layout = new wxBoxSizer(wxVERTICAL);
@@ -462,7 +526,7 @@ public:
                         const char separator = is_decimal_separator_point() ? '.' : ',';
                         entry.Replace(separator == '.' ? ',' : '.', separator, false);
                         double displayed;
-                        if (!entry.ToDouble(&displayed)) throw std::runtime_error("Enter a valid PrintFins number.");
+                        if (!entry.ToDouble(&displayed)) throw std::runtime_error(_u8L("Enter a valid PrintFins number."));
                         const double scale = spec.value("percent", false) ? 100. : 1.;
                         number->GetTextCtrl()->ChangeValue(double_to_string(
                             PrintFinsSettings::step(spec, displayed / scale, direction) * scale, 12));
@@ -504,7 +568,7 @@ public:
         }
         m_status = new wxStaticText(this, wxID_ANY, "");
         layout->Add(m_status, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(6));
-        m_generate = new Button(this, "Generate PrintFins (Auto)");
+        m_generate = new Button(this, _L("Generate PrintFins (Auto)"));
         layout->Add(m_generate, 0, wxALIGN_RIGHT);
         auto edited = [this](wxCommandEvent &) {
             commit();
@@ -523,23 +587,25 @@ public:
             try {
                 auto &plater = *wxGetApp().plater();
                 if (!plater.can_do_ui_job() || !plater.can_add_model() || plater.printer_technology() != ptFFF)
-                    throw std::runtime_error("Finish the current operation and select one complete model in Prepare.");
+                    throw std::runtime_error(_u8L("Finish the current operation and select one complete model in Prepare."));
                 const int index = selected_object(plater);
                 auto effective = m_config();
                 effective.apply(plater.model().objects[index]->config.get());
                 if (effective.opt_enum<SupportType>("support_type") != stPrintFins || !effective.opt_bool("enable_support"))
-                    throw std::runtime_error("Enable the PrintFins support type for the selected model first.");
+                    throw std::runtime_error(_u8L("Enable the PrintFins support type for the selected model first."));
+                if (effective.opt_bool("make_overhang_printable"))
+                    throw std::runtime_error(_u8L("Disable Make overhangs printable before generating PrintFins."));
                 if (effective.opt_int("raft_layers") != 0)
-                    throw std::runtime_error("Set Bambu raft layers to zero before generating PrintFins.");
+                    throw std::runtime_error(_u8L("Set Bambu raft layers to zero before generating PrintFins."));
                 const Json values = read();
                 const auto *stored = effective.option<ConfigOptionString>("printfins_options");
                 if (stored) {
                     const auto saved = Json::parse(stored->value);
                     for (auto it = saved.begin(); it != saved.end(); ++it) {
                         if (std::none_of(m_controls.begin(), m_controls.end(), [&](const auto &control) { return control.spec.at("key") == it.key(); }))
-                            throw std::runtime_error("Unknown PrintFins setting: " + it.key());
+                            throw std::runtime_error(_u8L("Unknown PrintFins setting: ") + it.key());
                         if (values.contains(it.key()) && values.at(it.key()) != it.value())
-                            throw std::runtime_error("The selected model has different PrintFins overrides. Open its object settings before generating.");
+                            throw std::runtime_error(_u8L("The selected model has different PrintFins overrides. Open its object settings before generating."));
                     }
                 }
                 PrintFinsDialog dialog(plater, index, &values);
@@ -576,7 +642,7 @@ public:
                             if (choice.at("value") == value) selected = index;
                             ++index;
                         }
-                        if (selected == wxNOT_FOUND) throw std::runtime_error("Invalid PrintFins choice: " + key);
+                        if (selected == wxNOT_FOUND) throw std::runtime_error(_u8L("Invalid PrintFins choice: ") + key);
                         static_cast<wxChoice *>(control.input)->SetSelection(selected);
                     }
                 }
@@ -593,10 +659,10 @@ public:
             }
             m_generate->Enable(config.opt_bool("enable_support"));
             const bool full = current.at("mode") == "full";
-            m_generate->SetLabel(full ? "Generate PrintFins (Full Coverage)" : "Generate PrintFins (Auto)");
+            m_generate->SetLabel(full ? _L("Generate PrintFins (Full Coverage)") : _L("Generate PrintFins (Auto)"));
             m_status->SetLabel(full
-                ? "Full Coverage: add original fill walls under overhangs left by Auto. Wide-face coverage controls density separately.\nSelect one complete model and generate before slicing."
-                : "Auto: select one complete model. Layer heights come from Bambu Studio.\nGenerate before slicing; fins become ordinary printable parts.");
+                ? _L("Full Coverage: add original fill walls under overhangs left by Auto. Wide-face coverage controls density separately.\nSelect one complete model and generate before slicing.")
+                : _L("Auto: select one complete model. Layer heights come from Bambu Studio.\nGenerate before slicing; fins become ordinary printable parts."));
             m_status->Wrap(FromDIP(400));
             Layout();
             GetParent()->Layout();
@@ -628,7 +694,7 @@ void show_printfins_tool(Plater &plater)
 {
     try {
         if (!plater.can_do_ui_job() || !plater.can_add_model() || plater.printer_technology() != ptFFF)
-            throw std::runtime_error("Finish the current operation and use the Prepare view with an FFF printer before opening PrintFins.");
+            throw std::runtime_error(_u8L("Finish the current operation and use the Prepare view with an FFF printer before opening PrintFins."));
         PrintFinsDialog dialog(plater, selected_object(plater));
         dialog.ShowModal();
     } catch (const std::exception &e) {

@@ -4,6 +4,7 @@ import { buildSettings } from '../../resources/printfins/settings.mjs';
 import { optionsFromSettings as optionsFromDialog } from '../../resources/printfins/schema.mjs';
 import { FDM_SCHEMA as OPTIONS_SCHEMA } from '../../resources/printfins/schema.mjs';
 import { generate } from '../../resources/printfins/adapter.mjs';
+import { translator } from '../../resources/printfins/i18n.mjs';
 
 // Small DOM double for schema/transport tests. Native WebView rendering and
 // project mutation still require the separate Bambu Studio desktop checklist.
@@ -29,6 +30,13 @@ function setup() {
     };
     return { form, read, control, set };
 }
+
+test('resource UI follows Russian locale and keeps English as the fallback', () => {
+    assert.equal(translator('ru_RU')('Generation mode'), 'Режим создания');
+    assert.equal(translator('en_US')('Generation mode'), 'Generation mode');
+    assert.equal(translator('de_DE')('Generation mode'), 'Generation mode');
+    assert.equal(translator('ru')('Unmapped future upstream label'), 'Unmapped future upstream label');
+});
 
 test('dialog controls use every editable upstream default, range, step and choice', () => {
     const { read, control } = setup();

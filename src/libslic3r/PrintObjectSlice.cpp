@@ -1161,6 +1161,8 @@ void PrintObject::slice_volumes()
         m_layers.back()->upper_layer = nullptr;
     m_print->throw_if_canceled();
 
+    this->apply_conical_overhang();
+
     // Is any ModelVolume MMU painted?
     if (const auto& volumes = this->model_object()->volumes;
         m_print->config().filament_diameter.size() > 1 && // BBS
@@ -1365,6 +1367,79 @@ void PrintObject::slice_volumes()
 
     m_print->throw_if_canceled();
     BOOST_LOG_TRIVIAL(debug) << "Slicing volumes - make_slices in parallel - end";
+}
+
+void PrintObject::apply_conical_overhang()
+{
+    if (m_layers.empty() || m_config.support_type.value == stPrintFins)
+        return;
+
+    const double overhang_angle = m_config.make_overhang_printable_angle.value;
+    if (overhang_angle == 90.)
+        return;
+
+    const double angle_radians = overhang_angle * M_PI / 180.;
+    const double max_hole_area = m_config.make_overhang_printable_hole_size.value;
+    const coordf_t max_distance = std::tan(angle_radians) * m_config.layer_height.value;
+    const coordf_t scaled_max_distance = -float(scale_(max_distance));
+    const coordf_t scaled_max_hole_area = float(scale_(scale_(max_hole_area)));
+
+    for (auto it = m_layers.rbegin() + 1; it != m_layers.rend(); ++it) {
+        m_print->throw_if_canceled();
+        Layer *layer = *it;
+        Layer *upper_layer = layer->upper_layer;
+
+        if (upper_layer == nullptr || upper_layer->empty())
+            continue;
+
+        if (std::all_of(layer->m_regions.begin(), layer->m_regions.end(), [](const LayerRegion *region) {
+                return region->slices.empty() || !region->region().config().make_overhang_printable.value;
+            }))
+            continue;
+
+        // Work on the complete layer first so material-region boundaries do not
+        // produce cracks in the generated conical geometry.
+        ExPolygons upper_polygons = union_ex(upper_layer->merged(float(SCALED_EPSILON)));
+        ExPolygons current_polygons = union_ex(layer->merged(float(SCALED_EPSILON)));
+
+        // Preserve small recesses in the model base instead of blindly closing
+        // every hole as the upper layer is propagated downward.
+        if (scaled_max_hole_area > 0.) {
+            for (const ExPolygon &layer_polygon : current_polygons) {
+                for (const Polygon &hole : layer_polygon.holes) {
+                    if (std::abs(hole.area()) >= scaled_max_hole_area)
+                        continue;
+                    ExPolygon hole_polygon(hole);
+                    ExPolygons overlap = intersection_ex(upper_polygons, hole_polygon);
+                    if (!overlap.empty() && xor_ex(overlap, hole_polygon).empty())
+                        upper_polygons = diff_ex(upper_polygons, hole_polygon);
+                }
+            }
+        }
+
+        upper_polygons = offset_ex(upper_polygons, scaled_max_distance);
+
+        for (size_t region_id = 0; region_id < this->num_printing_regions(); ++region_id) {
+            if (!upper_layer->m_regions[region_id]->region().config().make_overhang_printable.value)
+                continue;
+
+            ExPolygons added = union_ex(intersection_ex(upper_layer->m_regions[region_id]->slices.surfaces, upper_polygons));
+            added.erase(std::remove_if(added.begin(), added.end(), [&current_polygons](const ExPolygon &polygon) {
+                return diff_ex(polygon, current_polygons).empty();
+            }), added.end());
+
+            ExPolygons layer_polygons = to_expolygons(layer->m_regions[region_id]->slices.surfaces);
+            layer->m_regions[region_id]->slices.set(union_ex(layer_polygons, added), stInternal);
+
+            for (size_t other_region = 0; other_region < this->num_printing_regions(); ++other_region) {
+                if (other_region == region_id)
+                    continue;
+                ExPolygons other_polygons = to_expolygons(layer->m_regions[other_region]->slices.surfaces);
+                layer->m_regions[other_region]->slices.set(
+                    diff_ex(other_polygons, added, ApplySafetyOffset::Yes), stInternal);
+            }
+        }
+    }
 }
 
 //BBS: this function is used to offset contour and holes of expolygons seperately by different value

@@ -1,22 +1,24 @@
 import { optionVisible } from './vendor/plugins/shared/engine/fins_entry.js';
 import { FDM_SCHEMA as OPTIONS_SCHEMA, optionsFromSettings } from './schema.mjs';
+import { translator } from './i18n.mjs';
 
 // Host presentation and unit conversion, including the host-only generation mode.
 // Other defaults, validation and visibility use the original schema/entry point.
-export function buildSettings(form, document) {
+export function buildSettings(form, document, locale = 'en') {
+    const t = translator(locale);
     const controls = new Map();
     const rows = new Map();
     for (const section of OPTIONS_SCHEMA.sections) {
         const fieldset = document.createElement('fieldset');
         const legend = document.createElement('legend');
-        legend.textContent = section.label;
+        legend.textContent = t(section.label);
         fieldset.append(legend);
         for (const option of OPTIONS_SCHEMA.options.filter(o => o.section === section.id && o.hostSupplied !== 'slicer')) {
             const row = document.createElement('label');
             row.className = 'option';
-            row.title = option.tooltip || '';
+            row.title = t(option.tooltip || '');
             const caption = document.createElement('span');
-            caption.textContent = `${option.label}${option.hint ? ` (${option.hint})` : ''}`;
+            caption.textContent = `${t(option.label)}${option.hint ? ` (${t(option.hint)})` : ''}`;
             const control = document.createElement(option.type === 'choice' ? 'select' : 'input');
             control.id = option.key;
             control.name = option.key;
@@ -27,7 +29,7 @@ export function buildSettings(form, document) {
                 for (const choice of option.choices) {
                     const item = document.createElement('option');
                     item.value = choice.value;
-                    item.textContent = choice.label;
+                    item.textContent = t(choice.label);
                     control.append(item);
                 }
                 control.value = option.default;

@@ -199,6 +199,28 @@ TEST_CASE("PrintFins native settings reject corrupt stored values", "[PrintFins]
     }
 }
 
+TEST_CASE("Make overhangs printable configuration defaults and limits", "[Overhang][Settings]")
+{
+    const auto config = DynamicPrintConfig::full_print_config();
+
+    REQUIRE(config.has("make_overhang_printable"));
+    REQUIRE(config.has("make_overhang_printable_angle"));
+    REQUIRE(config.has("make_overhang_printable_hole_size"));
+    CHECK_FALSE(config.opt_bool("make_overhang_printable"));
+    CHECK(config.opt_float("make_overhang_printable_angle") == Approx(55.));
+    CHECK(config.opt_float("make_overhang_printable_hole_size") == Approx(0.));
+
+    const ConfigOptionDef *angle = print_config_def.get("make_overhang_printable_angle");
+    const ConfigOptionDef *hole_size = print_config_def.get("make_overhang_printable_hole_size");
+    REQUIRE(angle != nullptr);
+    REQUIRE(hole_size != nullptr);
+    CHECK(angle->type == coFloat);
+    CHECK(angle->min == Approx(0.));
+    CHECK(angle->max == Approx(90.));
+    CHECK(hole_size->type == coFloat);
+    CHECK(hole_size->min == Approx(0.));
+}
+
 TEST_CASE("PrintFins native Bambu 3MF preserves global and object settings", "[PrintFins][3mf]")
 {
     struct TemporaryDirectory {
@@ -217,6 +239,9 @@ TEST_CASE("PrintFins native Bambu 3MF preserves global and object settings", "[P
     }
     config.set_deserialize_strict("support_type", "printfins");
     config.set_key_value("enable_support", new ConfigOptionBool(true));
+    config.set_key_value("make_overhang_printable", new ConfigOptionBool(false));
+    config.set_key_value("make_overhang_printable_angle", new ConfigOptionFloat(52.));
+    config.set_key_value("make_overhang_printable_hole_size", new ConfigOptionFloat(8.));
     set_options(config, {{"mode","full"}, {"threshold",51}, {"tines",true}, {"tineDensity",0.37}, {"gap",0.23},
         {"padStyle","light"}, {"sway.on",true}, {"sway.gripFrom",31}, {"sway.tineSpacing",6.5},
         {"sway.reach",0.22}, {"cutout","arch"}, {"coverage",0.77}, {"plateOnly",true}});
@@ -251,11 +276,17 @@ TEST_CASE("PrintFins native Bambu 3MF preserves global and object settings", "[P
     REQUIRE(restored.has("support_type"));
     REQUIRE(restored.has("enable_support"));
     REQUIRE(restored.has("printfins_options"));
+    REQUIRE(restored.has("make_overhang_printable"));
+    REQUIRE(restored.has("make_overhang_printable_angle"));
+    REQUIRE(restored.has("make_overhang_printable_hole_size"));
     REQUIRE(reopened.objects.front()->config.has("printfins_options"));
     REQUIRE(reopened.objects.front()->volumes.size() == 1);
     REQUIRE(reopened.objects.front()->volumes.front()->config.has("printfins_options"));
     CHECK(restored.opt_enum<SupportType>("support_type") == stPrintFins);
     CHECK(restored.opt_bool("enable_support"));
+    CHECK_FALSE(restored.opt_bool("make_overhang_printable"));
+    CHECK(restored.opt_float("make_overhang_printable_angle") == Approx(52.));
+    CHECK(restored.opt_float("make_overhang_printable_hole_size") == Approx(8.));
     CHECK(restored.opt_string("printfins_options") == config.opt_string("printfins_options"));
     CHECK(reopened.objects.front()->config.get().opt_string("printfins_options") == object->config.get().opt_string("printfins_options"));
     CHECK(reopened.objects.front()->volumes.front()->config.get().opt_string("printfins_options") == object->volumes.front()->config.get().opt_string("printfins_options"));
