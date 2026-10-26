@@ -102,6 +102,9 @@ struct Http::priv
 	::curl_slist *headerlist;
 	// Used for reading the body
 	std::string buffer;
+	std::unique_ptr<fs::ofstream> download_file;
+	size_t received_size { 0 };
+	bool write_failed { false };
 	// Used for storing file streams added as multipart form parts
 	// Using a deque here because unlike vector it doesn't ivalidate pointers on insertion
 	std::deque<fs::ifstream> form_files;
@@ -216,12 +219,21 @@ size_t Http::priv::writecb(void *data, size_t size, size_t nmemb, void *userp)
 	const size_t realsize = size * nmemb;
 
 	const size_t limit = self->limit > 0 ? self->limit : DEFAULT_SIZE_LIMIT;
-	if (self->buffer.size() + realsize > limit) {
+	if (self->received_size + realsize > limit) {
 		// This makes curl_easy_perform return CURLE_WRITE_ERROR
 		return 0;
 	}
 
-	self->buffer.append(cdata, realsize);
+	if (self->download_file) {
+		self->download_file->write(cdata, static_cast<std::streamsize>(realsize));
+		if (!*self->download_file) {
+			self->write_failed = true;
+			return 0;
+		}
+	} else {
+		self->buffer.append(cdata, realsize);
+	}
+	self->received_size += realsize;
 
 	return realsize;
 }
@@ -430,6 +442,10 @@ void Http::priv::http_perform()
 	}
 
 	CURLcode res = ::curl_easy_perform(curl);
+	if (download_file) {
+		download_file->flush();
+		download_file->close();
+	}
 	if (res != CURLE_OK) {
 		if (res == CURLE_ABORTED_BY_CALLBACK) {
 			if (cancel) {
@@ -443,7 +459,7 @@ void Http::priv::http_perform()
 			}
 		}
 		else if (res == CURLE_WRITE_ERROR) {
-			if (errorfn) { errorfn(std::move(buffer), body_size_error(), 0); }
+			if (errorfn) { errorfn(std::move(buffer), write_failed ? "Unable to write HTTP response to file" : body_size_error(), 0); }
 		} else {
 			if (errorfn) { errorfn(std::move(buffer), curl_error(res), 0); }
 		};
@@ -506,6 +522,15 @@ Http& Http::timeout_max(long timeout)
 Http& Http::size_limit(size_t sizeLimit)
 {
 	if (p) { p->limit = sizeLimit; }
+	return *this;
+}
+
+Http& Http::to_file(const fs::path &path)
+{
+	if (!p) return *this;
+	p->download_file = std::make_unique<fs::ofstream>(path, std::ios::out | std::ios::binary | std::ios::trunc);
+	if (!*p->download_file)
+		throw Slic3r::RuntimeError("Unable to open HTTP download destination: " + path.string());
 	return *this;
 }
 

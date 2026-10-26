@@ -104,6 +104,9 @@ public:
 	// Sets a maximum size of the data that can be received.
 	// A value of zero sets the default limit, which is is 5MB.
 	Http& size_limit(size_t sizeLimit);
+	// Streams the response body directly to a file instead of retaining it in memory.
+	// The destination is truncated when the request starts.
+	Http& to_file(const boost::filesystem::path &path);
 	// Sets a HTTP header field.
 	Http& header(std::string name, const std::string &value);
 	// Removes a header field.

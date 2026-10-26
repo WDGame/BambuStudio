@@ -19884,3 +19884,48 @@ msgstr "Создание PrintFins… Отмену можно выполнить
 
 msgid "Generate fins for the selected model, or cancel to leave the project unchanged."
 msgstr "Создай рёбра для выбранной модели или отмени операцию, чтобы не изменять проект."
+
+msgid "Install update"
+msgstr "Установить обновление"
+
+msgid "Downloading update"
+msgstr "Загрузка обновления"
+
+msgid "Downloading the verified E-Core installer..."
+msgstr "Загрузка проверенного установщика E-Core…"
+
+msgid "This release does not contain a verifiable Windows installer. The release page will be opened instead."
+msgstr "В этом выпуске нет проверяемого установщика Windows. Вместо него будет открыта страница выпуска."
+
+msgid "Update unavailable"
+msgstr "Обновление недоступно"
+
+msgid "The update could not be downloaded."
+msgstr "Не удалось загрузить обновление."
+
+msgid "Update failed"
+msgstr "Ошибка обновления"
+
+msgid "The downloaded installer has an unexpected size and was deleted."
+msgstr "Размер загруженного установщика не совпадает с ожидаемым. Файл удалён."
+
+msgid "Update verification failed"
+msgstr "Не удалось проверить обновление"
+
+msgid "The downloaded installer failed SHA-256 verification and was deleted."
+msgstr "Загруженный установщик не прошёл проверку SHA-256 и был удалён."
+
+msgid "The verified installer could not be prepared for launch."
+msgstr "Не удалось подготовить проверенный установщик к запуску."
+
+msgid "The update was downloaded and verified. Bambu Studio E-Core will close, install the update, and start again. Save any work before continuing."
+msgstr "Обновление загружено и проверено. Bambu Studio E-Core закроется, установит обновление и запустится снова. Перед продолжением сохрани работу."
+
+msgid "The update installer could not be started."
+msgstr "Не удалось запустить установщик обновления."
+
+msgid "The update was cancelled because the application could not close."
+msgstr "Обновление отменено: приложению не удалось закрыться."
+
+msgid "Update cancelled"
+msgstr "Обновление отменено"

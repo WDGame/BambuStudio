@@ -133,11 +133,17 @@ jobs:
           cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
           cmake --build . --target install --config Release -- -m
 
-      # - name: Create installer Win
-      #   if: inputs.os == 'windows-latest'
-      #   working-directory: ${{ github.workspace }}/build
-      #   run: |
-      #     cpack -G NSIS
+      - name: Create E-Core installer Win
+        if: inputs.os == 'windows-latest'
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $state = Get-Content "printfins-fork.json" -Raw | ConvertFrom-Json
+          $installer = "BambuStudio_ECore_$($state.fork_version)_Setup.exe"
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          & $makensis "/DSOURCE_DIR=$env:GITHUB_WORKSPACE\install-dir" "/DOUTPUT_FILE=$env:GITHUB_WORKSPACE\$installer" "/DPRODUCT_VERSION=$($state.fork_version)" "/DPRODUCT_FILE_VERSION=$($state.upstream_version)" "$env:GITHUB_WORKSPACE\packaging\windows\ecore-installer.nsi"
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
+          "installer=$installer" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
 
       - name: Pack app
         if: inputs.os == 'windows-latest'
@@ -151,12 +157,14 @@ jobs:
       #   shell: cmd
       #   run: '"C:/Program Files/7-Zip/7z.exe" a -m0=lzma2 -mx9 Debug_PDB_${{ env.ver }}_for_developers_only.7z  *.pdb'
 
-      - name: Upload artifacts Win zip
+      - name: Upload Windows artifacts
         if: inputs.os == 'windows-latest'
         uses: actions/upload-artifact@v6
         with:
-          name: BambuStudio_Windows_${{ env.ver }}_portable
-          path: ${{ github.workspace }}/BambuStudio_Windows_${{ env.ver }}_portable.zip
+          name: BambuStudio_Windows_${{ env.ver }}
+          path: |
+            ${{ github.workspace }}/BambuStudio_Windows_${{ env.ver }}_portable.zip
+            ${{ github.workspace }}/${{ env.installer }}
 
 
   # Ubuntu
