@@ -37,19 +37,22 @@ test('E-Core updater downloads only a hashed installer and starts it hidden', ()
     assert.match(source, /sha256:/);
     assert.match(source, /sha256_file\(partial, actual_sha256\)/);
     assert.match(source, /actual_sha256 != version_info\.installer_sha256/);
-    assert.match(source, /wxEXEC_HIDE_CONSOLE/);
-    assert.match(source, /Wait-Process -Id/);
+    assert.match(source, /ShellExecuteExW/);
+    assert.match(source, /SW_HIDE/);
+    assert.match(source, /while \(Get-Process -Id \$ParentPid/);
     assert.match(source, /'\/S','\/UPDATE'/);
-    assert.match(source, /Remove-Item -LiteralPath \$p/);
+    assert.match(source, /\$installer\.WaitForExit\(\)/);
+    assert.match(source, /CancelPath/);
+    assert.match(source, /Remove-Item -LiteralPath \$InstallerPath/);
     assert.doesNotMatch(source, /case wxID_YES:\s*wxLaunchDefaultBrowser\(version_info\.url\)/);
     assert.match(http, /download_file->write/);
 });
 
-test('fork revision is bumped for the updater bootstrap release', () => {
+test('fork revision is bumped for the detached updater fix release', () => {
     const state = JSON.parse(read('printfins-fork.json'));
     const version = read('src/slic3r/GUI/ForkVersion.hpp');
-    assert.equal(state.fork_revision, 3);
-    assert.equal(state.fork_version, '02.08.02.61-ecore.3');
-    assert.match(version, /revision = 3/);
-    assert.match(version, /02\.08\.02\.61-ecore\.3/);
+    assert.equal(state.fork_revision, 4);
+    assert.equal(state.fork_version, '02.08.02.61-ecore.4');
+    assert.match(version, /revision = 4/);
+    assert.match(version, /02\.08\.02\.61-ecore\.4/);
 });
