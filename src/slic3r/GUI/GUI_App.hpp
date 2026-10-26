@@ -172,6 +172,10 @@ public:
     std::string version_name;
     std::string description;
     std::string url;
+    std::string installer_url;
+    std::string installer_name;
+    std::string installer_sha256;
+    size_t      installer_size { 0 };
     bool        force_upgrade{ false };
     int      ver_items[VERSION_LEN];  // AA.BB.CC.DD
     VersionInfo() {
@@ -560,6 +564,7 @@ public:
 
     void            check_update(bool show_tips, int by_user);
     void            check_new_version(bool show_tips = false, int by_user = 0);
+    void            download_and_install_update();
     void            check_cert();
     bool            process_network_msg(std::string dev_id, std::string msg);
     void            check_beta_version(bool show_tips_when_no_beta = false);

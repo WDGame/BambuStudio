@@ -338,13 +338,13 @@ UpdateVersionDialog::UpdateVersionDialog(wxWindow *parent)
     StateColor btn_bg_white(std::pair<wxColour, int>(wxColour(206, 206, 206), StateColor::Pressed), std::pair<wxColour, int>(wxColour(238, 238, 238), StateColor::Hovered),
                             std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
 
-    m_button_download = new Button(this, _L("Download"));
+    m_button_download = new Button(this, _L("Install update"));
     m_button_download->SetBackgroundColor(btn_bg_green);
     m_button_download->SetBorderColor(*wxWHITE);
     m_button_download->SetTextColor(wxColour("#FFFFFE"));
     m_button_download->SetFont(Label::Body_12);
-    m_button_download->SetSize(wxSize(FromDIP(58), FromDIP(24)));
-    m_button_download->SetMinSize(wxSize(FromDIP(58), FromDIP(24)));
+    m_button_download->SetSize(wxSize(FromDIP(110), FromDIP(24)));
+    m_button_download->SetMinSize(wxSize(FromDIP(110), FromDIP(24)));
     m_button_download->SetCornerRadius(FromDIP(12));
 
     m_button_download->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent &e) {

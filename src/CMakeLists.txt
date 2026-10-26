@@ -158,7 +158,7 @@ target_link_libraries(BambuStudio libslic3r_gui)
     if (MSVC)
         # Generate debug symbols even in release mode.
         target_link_options(BambuStudio PUBLIC "$<$<CONFIG:RELEASE>:/DEBUG>")
-        target_link_libraries(BambuStudio user32.lib Setupapi.lib)
+        target_link_libraries(BambuStudio user32.lib Setupapi.lib Advapi32.lib)
     elseif (MINGW)
         target_link_libraries(BambuStudio ws2_32 uxtheme setupapi)
     elseif (APPLE)

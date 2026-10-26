@@ -24,6 +24,7 @@
 #include "slic3r/GUI/I18N.hpp"
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <exception>
 #include <cstdlib>
@@ -31,9 +32,11 @@
 #include <regex>
 #include <thread>
 #include <string_view>
+#include <fstream>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
+#include <boost/filesystem/fstream.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/nowide/convert.hpp>
@@ -139,6 +142,7 @@
 #ifdef __WXMSW__
 #include <dbt.h>
 #include <shlobj.h>
+#include <wincrypt.h>
 
 #ifdef __WINDOWS__
 #ifdef _MSW_DARK_MODE
@@ -3356,7 +3360,7 @@ bool GUI_App::on_init_inner()
                     switch (dialog.ShowModal())
                     {
                     case wxID_YES:
-                        wxLaunchDefaultBrowser(version_info.url);
+                        download_and_install_update();
                         break;
                     case wxID_NO:
                         break;
@@ -5598,6 +5602,52 @@ void GUI_App::check_startup_version_policy()
 
 namespace {
 
+#ifdef __WXMSW__
+bool sha256_file(const boost::filesystem::path &path, std::string &hex_digest)
+{
+    HCRYPTPROV provider = 0;
+    HCRYPTHASH hash = 0;
+    if (!CryptAcquireContext(&provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+        return false;
+
+    bool ok = false;
+    if (CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
+        boost::filesystem::ifstream input(path, std::ios::in | std::ios::binary);
+        std::array<char, 1024 * 1024> buffer {};
+        while (input.good()) {
+            input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            const std::streamsize count = input.gcount();
+            if (count > 0 && !CryptHashData(hash, reinterpret_cast<const BYTE *>(buffer.data()),
+                                            static_cast<DWORD>(count), 0))
+                break;
+        }
+        if (input.eof()) {
+            std::array<BYTE, 32> digest {};
+            DWORD digest_size = static_cast<DWORD>(digest.size());
+            if (CryptGetHashParam(hash, HP_HASHVAL, digest.data(), &digest_size, 0) && digest_size == digest.size()) {
+                static constexpr char digits[] = "0123456789abcdef";
+                hex_digest.clear();
+                hex_digest.reserve(digest.size() * 2);
+                for (BYTE value : digest) {
+                    hex_digest.push_back(digits[value >> 4]);
+                    hex_digest.push_back(digits[value & 0x0f]);
+                }
+                ok = true;
+            }
+        }
+        CryptDestroyHash(hash);
+    }
+    CryptReleaseContext(provider, 0);
+    return ok;
+}
+
+std::string powershell_single_quote(std::string value)
+{
+    boost::replace_all(value, "'", "''");
+    return "'" + value + "'";
+}
+#endif
+
 /**
  * @brief Runs the dialog of a check point that guards an operation.
  *
@@ -5679,6 +5729,31 @@ void GUI_App::check_new_version(bool show_tips, int by_user)
                 version_info.url = release.value("html_url", "");
                 version_info.description = release.value("body", "");
                 version_info.force_upgrade = false;
+                version_info.installer_url.clear();
+                version_info.installer_name.clear();
+                version_info.installer_sha256.clear();
+                version_info.installer_size = 0;
+                if (release.contains("assets") && release["assets"].is_array()) {
+                    for (const auto &asset : release["assets"]) {
+                        const std::string name = asset.value("name", "");
+                        const std::string digest = asset.value("digest", "");
+                        if (!boost::iends_with(name, "_Setup.exe") || !boost::istarts_with(digest, "sha256:"))
+                            continue;
+                        const std::string sha256 = digest.substr(7);
+                        if (!std::regex_match(sha256, std::regex(R"([0-9a-fA-F]{64})")))
+                            continue;
+                        const std::string download_url = asset.value("browser_download_url", "");
+                        const std::string expected_prefix = std::string("https://github.com/") + ForkVersion::repository +
+                            "/releases/download/" + tag + "/";
+                        if (!boost::starts_with(download_url, expected_prefix))
+                            continue;
+                        version_info.installer_name = name;
+                        version_info.installer_url = download_url;
+                        version_info.installer_sha256 = boost::algorithm::to_lower_copy(sha256);
+                        version_info.installer_size = asset.value("size", size_t(0));
+                        break;
+                    }
+                }
                 app_config->set_str("app", "cloud_software_url", version_info.url);
                 CallAfter([this, show_tips, by_user, newer] {
                     if (newer && !version_info.url.empty()) request_new_version(by_user);
@@ -5696,6 +5771,116 @@ void GUI_App::check_new_version(bool show_tips, int by_user)
             handle_http_error(status, body);
             BOOST_LOG_TRIVIAL(error) << "E-Core release check error: " << error << " status=" << status;
         }).perform();
+}
+
+void GUI_App::download_and_install_update()
+{
+#ifndef __WXMSW__
+    wxLaunchDefaultBrowser(version_info.url);
+#else
+    if (version_info.installer_url.empty() || version_info.installer_sha256.empty() || version_info.installer_size == 0) {
+        MessageDialog(mainframe,
+            _L("This release does not contain a verifiable Windows installer. The release page will be opened instead."),
+            _L("Update unavailable"), wxOK | wxICON_WARNING).ShowModal();
+        wxLaunchDefaultBrowser(version_info.url);
+        return;
+    }
+
+    const boost::filesystem::path target = boost::filesystem::temp_directory_path() /
+        ("BambuStudio-ECore-" + version_info.version_str + "-Setup.exe");
+    const boost::filesystem::path partial(target.string() + ".download");
+    boost::system::error_code ec;
+    boost::filesystem::remove(partial, ec);
+
+    wxProgressDialog progress(_L("Downloading update"), _L("Downloading the verified E-Core installer..."),
+        100, mainframe, wxPD_APP_MODAL | wxPD_CAN_ABORT | wxPD_AUTO_HIDE | wxPD_ELAPSED_TIME | wxPD_REMAINING_TIME);
+    bool completed = false;
+    bool failed = false;
+    bool cancelled = false;
+    std::string failure;
+    try {
+        Slic3r::Http http = Slic3r::Http::get(version_info.installer_url);
+        http.header("accept", "application/octet-stream")
+            .timeout_connect(TIMEOUT_CONNECT)
+            .timeout_max(0)
+            .size_limit(version_info.installer_size + 1024 * 1024)
+            .to_file(partial)
+            .on_progress([&](Slic3r::Http::Progress state, bool &cancel) {
+                const size_t total = state.dltotal ? state.dltotal : version_info.installer_size;
+                const int percent = total ? static_cast<int>(std::min<size_t>(99, state.dlnow * 100 / total)) : 0;
+                if (!progress.Update(percent)) {
+                    cancelled = true;
+                    cancel = true;
+                }
+            })
+            .on_complete([&](std::string, unsigned) { completed = true; })
+            .on_error([&](std::string, std::string error, unsigned status) {
+                failed = true;
+                failure = error.empty() ? "HTTP " + std::to_string(status) : error;
+            })
+            .perform_sync();
+    } catch (const std::exception &error) {
+        failed = true;
+        failure = error.what();
+    }
+
+    if (cancelled || failed || !completed) {
+        boost::filesystem::remove(partial, ec);
+        if (!cancelled)
+            MessageDialog(mainframe, _L("The update could not be downloaded.") + "\n\n" + wxString::FromUTF8(failure),
+                _L("Update failed"), wxOK | wxICON_ERROR).ShowModal();
+        return;
+    }
+
+    if (boost::filesystem::file_size(partial, ec) != version_info.installer_size || ec) {
+        boost::filesystem::remove(partial, ec);
+        MessageDialog(mainframe, _L("The downloaded installer has an unexpected size and was deleted."),
+            _L("Update verification failed"), wxOK | wxICON_ERROR).ShowModal();
+        return;
+    }
+
+    std::string actual_sha256;
+    if (!sha256_file(partial, actual_sha256) || actual_sha256 != version_info.installer_sha256) {
+        boost::filesystem::remove(partial, ec);
+        MessageDialog(mainframe, _L("The downloaded installer failed SHA-256 verification and was deleted."),
+            _L("Update verification failed"), wxOK | wxICON_ERROR).ShowModal();
+        return;
+    }
+
+    boost::filesystem::remove(target, ec);
+    boost::filesystem::rename(partial, target, ec);
+    if (ec) {
+        MessageDialog(mainframe, _L("The verified installer could not be prepared for launch."),
+            _L("Update failed"), wxOK | wxICON_ERROR).ShowModal();
+        return;
+    }
+    progress.Update(100);
+
+    MessageDialog confirmation(mainframe,
+        _L("The update was downloaded and verified. Bambu Studio E-Core will close, install the update, and start again. Save any work before continuing."),
+        _L("Install update"), wxYES_NO | wxNO_DEFAULT | wxICON_INFORMATION);
+    if (confirmation.ShowModal() != wxID_YES)
+        return;
+
+    const DWORD current_pid = GetCurrentProcessId();
+    const std::string command = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \""
+        "$p=" + powershell_single_quote(target.string()) + "; "
+        "Wait-Process -Id " + std::to_string(current_pid) + " -ErrorAction SilentlyContinue; "
+        "Start-Process -FilePath $p -ArgumentList '/S','/UPDATE' -Wait; "
+        "Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue\"";
+    const long helper_pid = wxExecute(wxString::FromUTF8(command), wxEXEC_ASYNC | wxEXEC_HIDE_CONSOLE);
+    if (helper_pid <= 0) {
+        MessageDialog(mainframe, _L("The update installer could not be started."),
+            _L("Update failed"), wxOK | wxICON_ERROR).ShowModal();
+        return;
+    }
+
+    if (!mainframe->Close(false)) {
+        wxKill(helper_pid, wxSIGKILL, nullptr, wxKILL_CHILDREN);
+        MessageDialog(mainframe, _L("The update was cancelled because the application could not close."),
+            _L("Update cancelled"), wxOK | wxICON_INFORMATION).ShowModal();
+    }
+#endif
 }
 
 void GUI_App::check_beta_version(bool show_tips_when_no_beta)

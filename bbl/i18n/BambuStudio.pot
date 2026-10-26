@@ -17983,3 +17983,48 @@ msgstr ""
 #: resources/data/helio_hints.ini: [hint: First-Time-Right Reliability]
 msgid "First-Time-Right Reliability\nLess babysitting, more predictable output. Example: a small farm running PETG parts avoids 'fail at hour 6' surprises and keeps batches on schedule."
 msgstr ""
+
+msgid "Install update"
+msgstr ""
+
+msgid "Downloading update"
+msgstr ""
+
+msgid "Downloading the verified E-Core installer..."
+msgstr ""
+
+msgid "This release does not contain a verifiable Windows installer. The release page will be opened instead."
+msgstr ""
+
+msgid "Update unavailable"
+msgstr ""
+
+msgid "The update could not be downloaded."
+msgstr ""
+
+msgid "Update failed"
+msgstr ""
+
+msgid "The downloaded installer has an unexpected size and was deleted."
+msgstr ""
+
+msgid "Update verification failed"
+msgstr ""
+
+msgid "The downloaded installer failed SHA-256 verification and was deleted."
+msgstr ""
+
+msgid "The verified installer could not be prepared for launch."
+msgstr ""
+
+msgid "The update was downloaded and verified. Bambu Studio E-Core will close, install the update, and start again. Save any work before continuing."
+msgstr ""
+
+msgid "The update installer could not be started."
+msgstr ""
+
+msgid "The update was cancelled because the application could not close."
+msgstr ""
+
+msgid "Update cancelled"
+msgstr ""
