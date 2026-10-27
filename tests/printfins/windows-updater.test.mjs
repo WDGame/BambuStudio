@@ -53,8 +53,8 @@ test('E-Core updater downloads only a hashed installer and starts it hidden', ()
 test('fork revision is bumped for the direct-manifest updater release', () => {
     const state = JSON.parse(read('printfins-fork.json'));
     const version = read('src/slic3r/GUI/ForkVersion.hpp');
-    assert.equal(state.fork_revision, 5);
-    assert.equal(state.fork_version, '02.08.02.61-ecore.5');
-    assert.match(version, /revision = 5/);
-    assert.match(version, /02\.08\.02\.61-ecore\.5/);
+    assert.equal(state.fork_revision, 6);
+    assert.equal(state.fork_version, '02.08.02.61-ecore.6');
+    assert.match(version, /revision = 6/);
+    assert.match(version, /02\.08\.02\.61-ecore\.6/);
 });
