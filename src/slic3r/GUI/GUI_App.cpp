@@ -5759,68 +5759,61 @@ bool GUI_App::check_send_print_version_policy()
 
 void GUI_App::check_new_version(bool show_tips, int by_user)
 {
-    // E-Core builds follow only published stable releases of this fork. This
-    // deliberately avoids mixing the official Bambu channel with fork builds.
-    const std::string url = std::string("https://api.github.com/repos/") + ForkVersion::repository + "/releases";
+    // The release manifest is a normal GitHub release asset, so checking it does
+    // not consume the unauthenticated GitHub API quota. This matters for users
+    // behind shared VPN/proxy addresses where the 60 requests/hour API limit is
+    // routinely exhausted by unrelated clients.
+    const std::string repository = ForkVersion::repository;
+    const std::string url = std::string("https://github.com/") + repository +
+        "/releases/latest/download/latest.json";
     Slic3r::Http http = Slic3r::Http::get(url);
 
     http.header("accept", "application/json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
         .timeout_connect(TIMEOUT_CONNECT)
         .timeout_max(TIMEOUT_RESPONSE)
         .on_complete([this, show_tips, by_user](std::string body, unsigned) {
         try {
-            const json releases = json::parse(body);
-            const std::regex tag_regex(R"(^v(\d{2}\.\d{2}\.\d{2}\.\d{2})-ecore\.(\d+)$)");
-            for (const auto &release : releases) {
-                if (release.value("draft", true) || release.value("prerelease", true)) continue;
-                const std::string tag = release.value("tag_name", "");
-                std::smatch match;
-                if (!std::regex_match(tag, match, tag_regex)) continue;
-                const std::string remote_upstream = match[1].str();
-                const int remote_revision = std::stoi(match[2].str());
-                const auto current = Semver::parse(ForkVersion::upstream_version);
-                const auto remote = Semver::parse(remote_upstream);
-                const bool newer = current && remote &&
-                    (*remote > *current || (*remote == *current && remote_revision > ForkVersion::revision));
+            const json manifest = json::parse(body);
+            if (manifest.value("schema", 0) != 2 || manifest.value("channel", "") != "stable")
+                throw std::runtime_error("unsupported release manifest");
 
-                version_info.version_str = tag.substr(1);
-                version_info.url = release.value("html_url", "");
-                version_info.description = release.value("body", "");
-                version_info.force_upgrade = false;
-                version_info.installer_url.clear();
-                version_info.installer_name.clear();
-                version_info.installer_sha256.clear();
-                version_info.installer_size = 0;
-                if (release.contains("assets") && release["assets"].is_array()) {
-                    for (const auto &asset : release["assets"]) {
-                        const std::string name = asset.value("name", "");
-                        const std::string digest = asset.value("digest", "");
-                        if (!boost::iends_with(name, "_Setup.exe") || !boost::istarts_with(digest, "sha256:"))
-                            continue;
-                        const std::string sha256 = digest.substr(7);
-                        if (!std::regex_match(sha256, std::regex(R"([0-9a-fA-F]{64})")))
-                            continue;
-                        const std::string download_url = asset.value("browser_download_url", "");
-                        const std::string expected_prefix = std::string("https://github.com/") + ForkVersion::repository +
-                            "/releases/download/" + tag + "/";
-                        if (!boost::starts_with(download_url, expected_prefix))
-                            continue;
-                        version_info.installer_name = name;
-                        version_info.installer_url = download_url;
-                        version_info.installer_sha256 = boost::algorithm::to_lower_copy(sha256);
-                        version_info.installer_size = asset.value("size", size_t(0));
-                        break;
-                    }
-                }
-                app_config->set_str("app", "cloud_software_url", version_info.url);
-                CallAfter([this, show_tips, by_user, newer] {
-                    if (newer && !version_info.url.empty()) request_new_version(by_user);
-                    else if (show_tips) no_new_version();
-                });
-                return;
-            }
-            CallAfter([this, show_tips] { if (show_tips) no_new_version(); });
+            const std::regex tag_regex(R"(^v(\d{2}\.\d{2}\.\d{2}\.\d{2})-ecore\.(\d+)$)");
+            const std::string tag = manifest.value("tag", "");
+            std::smatch match;
+            if (!std::regex_match(tag, match, tag_regex))
+                throw std::runtime_error("invalid release tag");
+
+            const std::string remote_upstream = match[1].str();
+            const int remote_revision = std::stoi(match[2].str());
+            const auto current = Semver::parse(ForkVersion::upstream_version);
+            const auto remote = Semver::parse(remote_upstream);
+            const bool newer = current && remote &&
+                (*remote > *current || (*remote == *current && remote_revision > ForkVersion::revision));
+
+            const json installer = manifest.value("installer", json::object());
+            const std::string name = installer.value("asset", "");
+            const std::string sha256 = installer.value("sha256", "");
+            const size_t size = installer.value("size", size_t(0));
+            if (!boost::iends_with(name, "_Setup.exe") ||
+                !std::regex_match(sha256, std::regex(R"([0-9a-fA-F]{64})")) || size == 0)
+                throw std::runtime_error("invalid installer metadata");
+
+            const std::string release_prefix = std::string("https://github.com/") + ForkVersion::repository +
+                "/releases/";
+            version_info.version_str = tag.substr(1);
+            version_info.url = release_prefix + "tag/" + tag;
+            version_info.description = std::string("Bambu Studio E-Core ") + version_info.version_str;
+            version_info.force_upgrade = false;
+            version_info.installer_name = name;
+            version_info.installer_url = release_prefix + "download/" + tag + "/" + name;
+            version_info.installer_sha256 = boost::algorithm::to_lower_copy(sha256);
+            version_info.installer_size = size;
+
+            app_config->set_str("app", "cloud_software_url", version_info.url);
+            CallAfter([this, show_tips, by_user, newer] {
+                if (newer && !version_info.url.empty()) request_new_version(by_user);
+                else if (show_tips) no_new_version();
+            });
         }
         catch (const std::exception &error) {
             BOOST_LOG_TRIVIAL(error) << "E-Core release check failed: " << error.what();

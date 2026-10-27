@@ -32,9 +32,11 @@ test('E-Core updater downloads only a hashed installer and starts it hidden', ()
 
     assert.match(header, /installer_sha256/);
     assert.match(header, /installer_size/);
-    assert.match(source, /browser_download_url/);
-    assert.match(source, /https:\/\/github\.com\//);
-    assert.match(source, /sha256:/);
+    assert.match(source, /releases\/latest\/download\/latest\.json/);
+    assert.doesNotMatch(source, /api\.github\.com\/repos\/"\) \+ ForkVersion::repository/);
+    assert.match(source, /manifest\.value\("schema", 0\) != 2/);
+    assert.match(source, /manifest\.value\("channel", ""\) != "stable"/);
+    assert.match(source, /installer\.value\("sha256", ""\)/);
     assert.match(source, /sha256_file\(partial, actual_sha256\)/);
     assert.match(source, /actual_sha256 != version_info\.installer_sha256/);
     assert.match(source, /ShellExecuteExW/);
@@ -48,11 +50,11 @@ test('E-Core updater downloads only a hashed installer and starts it hidden', ()
     assert.match(http, /download_file->write/);
 });
 
-test('fork revision is bumped for the detached updater fix release', () => {
+test('fork revision is bumped for the direct-manifest updater release', () => {
     const state = JSON.parse(read('printfins-fork.json'));
     const version = read('src/slic3r/GUI/ForkVersion.hpp');
-    assert.equal(state.fork_revision, 4);
-    assert.equal(state.fork_version, '02.08.02.61-ecore.4');
-    assert.match(version, /revision = 4/);
-    assert.match(version, /02\.08\.02\.61-ecore\.4/);
+    assert.equal(state.fork_revision, 5);
+    assert.equal(state.fork_version, '02.08.02.61-ecore.5');
+    assert.match(version, /revision = 5/);
+    assert.match(version, /02\.08\.02\.61-ecore\.5/);
 });
