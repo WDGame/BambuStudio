@@ -4,8 +4,8 @@
   "upstream_tag": "v02.08.02.61",
   "upstream_version": "02.08.02.61",
   "upstream_commit": "926a7192574bcb9b3a732e1ec59a46d79cb45466",
-  "fork_revision": 3,
-  "fork_version": "02.08.02.61-ecore.3",
+  "fork_revision": 4,
+  "fork_version": "02.08.02.61-ecore.4",
   "release_repository": "WDGame/BambuStudio",
   "release_channel": "stable",
   "features": [

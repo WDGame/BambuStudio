@@ -141,6 +141,7 @@
 
 #ifdef __WXMSW__
 #include <dbt.h>
+#include <shellapi.h>
 #include <shlobj.h>
 #include <wincrypt.h>
 
@@ -5641,10 +5642,68 @@ bool sha256_file(const boost::filesystem::path &path, std::string &hex_digest)
     return ok;
 }
 
-std::string powershell_single_quote(std::string value)
+bool launch_detached_update_helper(const boost::filesystem::path &installer, DWORD parent_pid,
+                                   boost::filesystem::path &cancel_path)
 {
-    boost::replace_all(value, "'", "''");
-    return "'" + value + "'";
+    boost::filesystem::path script_path(installer.string() + ".update.ps1");
+    cancel_path = boost::filesystem::path(installer.string() + ".cancel");
+    const boost::filesystem::path log_path(installer.string() + ".update.log");
+
+    boost::system::error_code ec;
+    boost::filesystem::remove(cancel_path, ec);
+    boost::filesystem::remove(log_path, ec);
+
+    boost::filesystem::ofstream script(script_path, std::ios::out | std::ios::trunc);
+    if (!script)
+        return false;
+    script <<
+        "param([int]$ParentPid,[string]$InstallerPath,[string]$CancelPath,[string]$LogPath)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "try {\n"
+        "  while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {\n"
+        "    if (Test-Path -LiteralPath $CancelPath) { return }\n"
+        "    Start-Sleep -Milliseconds 250\n"
+        "  }\n"
+        "  if (Test-Path -LiteralPath $CancelPath) { return }\n"
+        "  $installer = Start-Process -FilePath $InstallerPath -ArgumentList @('/S','/UPDATE') -PassThru\n"
+        "  $installer.WaitForExit()\n"
+        "  if ($installer.ExitCode -ne 0) { throw \"Installer exit code: $($installer.ExitCode)\" }\n"
+        "  Remove-Item -LiteralPath $InstallerPath -Force -ErrorAction SilentlyContinue\n"
+        "} catch {\n"
+        "  $_ | Out-File -LiteralPath $LogPath -Encoding utf8\n"
+        "  exit 1\n"
+        "} finally {\n"
+        "  Remove-Item -LiteralPath $CancelPath -Force -ErrorAction SilentlyContinue\n"
+        "  Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n"
+        "}\n";
+    script.close();
+    if (!script)
+        return false;
+
+    const wxString script_path_w = wxString::FromUTF8(script_path.string());
+    const wxString installer_w = wxString::FromUTF8(installer.string());
+    const wxString cancel_path_w = wxString::FromUTF8(cancel_path.string());
+    const wxString log_path_w = wxString::FromUTF8(log_path.string());
+    const wxString parameters = wxString::Format(
+        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"%s\" "
+        "-ParentPid %lu -InstallerPath \"%s\" -CancelPath \"%s\" -LogPath \"%s\"",
+        script_path_w.wc_str(), static_cast<unsigned long>(parent_pid), installer_w.wc_str(),
+        cancel_path_w.wc_str(), log_path_w.wc_str());
+
+    SHELLEXECUTEINFOW info {};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+    info.lpVerb = L"open";
+    info.lpFile = L"powershell.exe";
+    info.lpParameters = parameters.wc_str();
+    info.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&info)) {
+        boost::filesystem::remove(script_path, ec);
+        return false;
+    }
+    if (info.hProcess != nullptr)
+        CloseHandle(info.hProcess);
+    return true;
 }
 #endif
 
@@ -5862,21 +5921,17 @@ void GUI_App::download_and_install_update()
     if (confirmation.ShowModal() != wxID_YES)
         return;
 
-    const DWORD current_pid = GetCurrentProcessId();
-    const std::string command = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \""
-        "$p=" + powershell_single_quote(target.string()) + "; "
-        "Wait-Process -Id " + std::to_string(current_pid) + " -ErrorAction SilentlyContinue; "
-        "Start-Process -FilePath $p -ArgumentList '/S','/UPDATE' -Wait; "
-        "Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue\"";
-    const long helper_pid = wxExecute(wxString::FromUTF8(command), wxEXEC_ASYNC | wxEXEC_HIDE_CONSOLE);
-    if (helper_pid <= 0) {
+    boost::filesystem::path cancel_path;
+    if (!launch_detached_update_helper(target, GetCurrentProcessId(), cancel_path)) {
         MessageDialog(mainframe, _L("The update installer could not be started."),
             _L("Update failed"), wxOK | wxICON_ERROR).ShowModal();
         return;
     }
 
     if (!mainframe->Close(false)) {
-        wxKill(helper_pid, wxSIGKILL, nullptr, wxKILL_CHILDREN);
+        boost::filesystem::ofstream cancel(cancel_path, std::ios::out | std::ios::trunc);
+        cancel << "cancel\n";
+        cancel.close();
         MessageDialog(mainframe, _L("The update was cancelled because the application could not close."),
             _L("Update cancelled"), wxOK | wxICON_INFORMATION).ShowModal();
     }
