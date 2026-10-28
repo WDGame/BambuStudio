@@ -23,6 +23,10 @@ test('Windows release builds and publishes a per-user NSIS installer', () => {
     assert.match(nsis, /Section "Uninstall"/);
     assert.match(nsis, /Bambu Studio PrintFins\.previous/);
     assert.match(nsis, /\/UPDATE/);
+    assert.match(nsis, /AutoCloseWindow true|SetAutoClose true/);
+    assert.match(nsis, /Var IsUpdate/);
+    assert.match(nsis, /MUI_PAGE_CUSTOMFUNCTION_PRE/);
+    assert.doesNotMatch(nsis, /SetSilent silent/);
 });
 
 test('E-Core updater downloads only a hashed installer and starts it hidden', () => {
@@ -39,10 +43,13 @@ test('E-Core updater downloads only a hashed installer and starts it hidden', ()
     assert.match(source, /installer\.value\("sha256", ""\)/);
     assert.match(source, /sha256_file\(partial, actual_sha256\)/);
     assert.match(source, /actual_sha256 != version_info\.installer_sha256/);
+    assert.match(source, /std::vector<char> buffer\(64 \* 1024\)/);
+    assert.doesNotMatch(source, /std::array<char, 1024 \* 1024> buffer/);
     assert.match(source, /ShellExecuteExW/);
     assert.match(source, /SW_HIDE/);
     assert.match(source, /while \(Get-Process -Id \$ParentPid/);
-    assert.match(source, /'\/S','\/UPDATE'/);
+    assert.match(source, /'\/UPDATE'/);
+    assert.doesNotMatch(source, /ArgumentList @\('\/S'/);
     assert.match(source, /\$installer\.WaitForExit\(\)/);
     assert.match(source, /CancelPath/);
     assert.match(source, /Remove-Item -LiteralPath \$InstallerPath/);

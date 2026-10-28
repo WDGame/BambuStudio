@@ -5614,7 +5614,10 @@ bool sha256_file(const boost::filesystem::path &path, std::string &hex_digest)
     bool ok = false;
     if (CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
         boost::filesystem::ifstream input(path, std::ios::in | std::ios::binary);
-        std::array<char, 1024 * 1024> buffer {};
+        // Keep the hashing buffer off the Windows GUI thread stack.  A 1 MiB
+        // local array exhausts the default thread stack before the installer
+        // can be verified and produces APPCRASH 0xc00000fd.
+        std::vector<char> buffer(64 * 1024);
         while (input.good()) {
             input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
             const std::streamsize count = input.gcount();
@@ -5665,7 +5668,7 @@ bool launch_detached_update_helper(const boost::filesystem::path &installer, DWO
         "    Start-Sleep -Milliseconds 250\n"
         "  }\n"
         "  if (Test-Path -LiteralPath $CancelPath) { return }\n"
-        "  $installer = Start-Process -FilePath $InstallerPath -ArgumentList @('/S','/UPDATE') -PassThru\n"
+        "  $installer = Start-Process -FilePath $InstallerPath -ArgumentList @('/UPDATE') -PassThru\n"
         "  $installer.WaitForExit()\n"
         "  if ($installer.ExitCode -ne 0) { throw \"Installer exit code: $($installer.ExitCode)\" }\n"
         "  Remove-Item -LiteralPath $InstallerPath -Force -ErrorAction SilentlyContinue\n"

@@ -23,6 +23,8 @@ Unicode True
 !define PRODUCT_DATA_DIR "$LOCALAPPDATA\BambuStudio-PrintFins-Data"
 !define PRODUCT_BACKUP_DIR "$LOCALAPPDATA\Programs\Bambu Studio PrintFins.previous"
 
+Var IsUpdate
+
 Name "${PRODUCT_NAME}"
 OutFile "${OUTPUT_FILE}"
 InstallDir "$LOCALAPPDATA\Programs\Bambu Studio PrintFins"
@@ -45,10 +47,34 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Bambu Studio contributors and E-Cor
 !define MUI_FINISHPAGE_RUN_PARAMETERS "--datadir $\"${PRODUCT_DATA_DIR}$\""
 !define MUI_FINISHPAGE_RUN_TEXT "Run Bambu Studio E-Core"
 
+Function SkipWelcome
+  ${If} $IsUpdate == "1"
+    Abort
+  ${EndIf}
+FunctionEnd
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipWelcome
 !insertmacro MUI_PAGE_WELCOME
+!undef MUI_PAGE_CUSTOMFUNCTION_PRE
+
+Function SkipDirectory
+  ${If} $IsUpdate == "1"
+    Abort
+  ${EndIf}
+FunctionEnd
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipDirectory
 !insertmacro MUI_PAGE_DIRECTORY
+!undef MUI_PAGE_CUSTOMFUNCTION_PRE
+
 !insertmacro MUI_PAGE_INSTFILES
+
+Function SkipFinish
+  ${If} $IsUpdate == "1"
+    Abort
+  ${EndIf}
+FunctionEnd
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipFinish
 !insertmacro MUI_PAGE_FINISH
+!undef MUI_PAGE_CUSTOMFUNCTION_PRE
 
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -60,7 +86,8 @@ Function .onInit
   ClearErrors
   ${GetOptions} "$R0" "/UPDATE" $R1
   ${IfNot} ${Errors}
-    SetSilent silent
+    StrCpy $IsUpdate "1"
+    SetAutoClose true
   ${EndIf}
 FunctionEnd
 
