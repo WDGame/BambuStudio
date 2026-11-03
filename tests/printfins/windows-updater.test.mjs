@@ -60,8 +60,8 @@ test('E-Core updater downloads only a hashed installer and starts it hidden', ()
 test('fork revision is bumped for the final verified updater release', () => {
     const state = JSON.parse(read('printfins-fork.json'));
     const version = read('src/slic3r/GUI/ForkVersion.hpp');
-    assert.equal(state.fork_revision, 7);
-    assert.equal(state.fork_version, '02.08.02.61-ecore.7');
-    assert.match(version, /revision = 7/);
-    assert.match(version, /02\.08\.02\.61-ecore\.7/);
+    assert.equal(state.fork_revision, 8);
+    assert.equal(state.fork_version, '02.08.02.61-ecore.8');
+    assert.match(version, /revision = 8/);
+    assert.match(version, /02\.08\.02\.61-ecore\.8/);
 });
