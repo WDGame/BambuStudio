@@ -124,13 +124,28 @@ jobs:
           choco install nsis
           choco install pkgconfiglite
 
+      - name: Select Windows SDK with 3D Repair support
+        if: inputs.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $includeRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include'
+          $sdk = Get-ChildItem -Path $includeRoot -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName 'winrt\windows.graphics.printing3d.h') } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if (-not $sdk) {
+            throw "No Windows SDK with windows.graphics.printing3d.h found under $includeRoot"
+          }
+          "WIN10SDK_PATH=$($sdk.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          Write-Host "Using Windows SDK $($sdk.Name) for Windows 3D Repair"
+
       - name: Build slicer Win
         if: inputs.os == 'windows-latest'
         working-directory: ${{ github.workspace }}
         run: |
           mkdir build
           cd build
-          cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
+          cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DBBL_REQUIRE_WIN10SDK=ON -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="$env:WIN10SDK_PATH"
           cmake --build . --target install --config Release -- -m
 
       - name: Create E-Core installer Win
