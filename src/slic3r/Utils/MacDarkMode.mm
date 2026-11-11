@@ -30,6 +30,12 @@
 
 static const char kBBLCrashProxyKey = 0;
 
+// -[WKWebView setInspectable:] 自 macOS 13.3 / Safari 16.4 起提供。显式声明分类，
+// 使旧 SDK 下也能编译；运行期以 respondsToSelector: 兜底，旧系统不会调用。
+@interface WKWebView (BBLInspectable)
+- (void)setInspectable:(BOOL)inspectable;
+@end
+
 @implementation MacDarkMode
 
 namespace Slic3r {
@@ -113,6 +119,43 @@ void WKWebView_setTransparentBackground(void * web)
     WKWebView * webView = (WKWebView*)web;
     [webView layer].backgroundColor = [NSColor clearColor].CGColor;
     [webView registerForDraggedTypes: @[NSFilenamesPboardType]];
+}
+
+static const char kBBLWebSuperviewKey = 0;
+
+void WKWebView_setCompositorSuppressed(void * web, bool suppress)
+{
+    WKWebView * webView = (WKWebView *) web;
+    if (!webView)
+        return;
+
+    if (suppress) {
+        NSView * parent = [webView superview];
+        if (parent)
+            objc_setAssociatedObject(webView, &kBBLWebSuperviewKey, parent, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [webView setHidden:YES];
+        [webView setAlphaValue:0.0];
+        if ([webView layer])
+            [[webView layer] setOpacity:0.0];
+        if ([webView superview])
+            [webView removeFromSuperview];
+    } else {
+        [webView setAlphaValue:1.0];
+        if ([webView layer])
+            [[webView layer] setOpacity:1.0];
+        [webView setHidden:NO];
+        NSView * parent = (NSView *) objc_getAssociatedObject(webView, &kBBLWebSuperviewKey);
+        if (parent && [webView superview] == nil)
+            [parent addSubview:webView];
+    }
+}
+
+void WKWebView_setInspectable(void * web, bool enable)
+{
+    WKWebView * webView = (WKWebView*)web;
+    if (@available(macOS 13.3, *)) {
+        [webView setInspectable:(enable ? YES : NO)];
+    }
 }
 
 void WKWebView_clearBambulabTokenCookies()

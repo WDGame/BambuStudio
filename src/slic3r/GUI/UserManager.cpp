@@ -4,9 +4,11 @@
 #include "NetworkAgent.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
+#include "BindDialog.hpp"
 #include "MsgDialog.hpp"
 
 #include "DeviceCore/DevManager.h"
+#include "libslic3r/Log.hpp"
 
 
 namespace Slic3r {
@@ -71,7 +73,9 @@ int UserManager::parse_json(std::string payload)
             }
         }
     }
-    catch (...){}
+    catch (...){
+        BOOST_LOG_TRIVIAL(warning) << current_exception_message();
+    }
 
     return -1;
 }

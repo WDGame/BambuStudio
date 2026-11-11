@@ -5,6 +5,7 @@
 #include <memory>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <stack>
 #include <vector>
 
@@ -16,7 +17,7 @@
 #include "MeshUtils.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
 #include "Camera.hpp"
-namespace Slic3r { namespace GUI { class AssemblyStepsUtils; } }
+#include "GLCanvasType.hpp"
 #include "IMToolbar.hpp"
 #include "slic3r/GUI/3DBed.hpp"
 #include "libslic3r/Slicing.hpp"
@@ -60,6 +61,7 @@ namespace GUI {
 namespace gcode {
     class GCodeViewer;
 };
+class AssemblyStepsUtils;
 class PartPlateList;
 class PartPlate;
 class OpenGLManager;
@@ -423,7 +425,8 @@ class GLCanvas3D
         TpuNozzleMultipleFilaments,
         HighTempNeedWrappingDetection,
         SingleExtruderMixedFilament,
-        BrittleFilament
+        BrittleFilament,
+        AllObjectsUnprintable
     };
 
     class RenderStats
@@ -589,13 +592,12 @@ public:
         bool  min_area = true;
     };
 
-    //BBS: add canvas type for assemble view usage
-    enum ECanvasType
-    {
-        CanvasView3D = 0,
-        CanvasPreview = 1,
-        CanvasAssembleView = 2,
-    };
+    // Alias + enumerator mirrors for the lightweight definitions in GLCanvasType.hpp.
+    // Keeps existing call sites such as GLCanvas3D::ECanvasType / GLCanvas3D::CanvasView3D.
+    using ECanvasType = ::Slic3r::GUI::ECanvasType;
+    static constexpr ECanvasType CanvasView3D       = ::Slic3r::GUI::CanvasView3D;
+    static constexpr ECanvasType CanvasPreview      = ::Slic3r::GUI::CanvasPreview;
+    static constexpr ECanvasType CanvasAssembleView = ::Slic3r::GUI::CanvasAssembleView;
 
     int GetHoverId();
     void set_ignore_left_up() { m_mouse.ignore_left_up = true; }
@@ -651,9 +653,6 @@ private:
     bool m_extra_frame_requested;
     bool m_event_handlers_bound{ false };
 
-    // Timestamp of the last detected touchpad scroll event, used to keep
-    // treating subsequent events as pan even if rotation momentarily hits WHEEL_DELTA.
-    int64_t m_last_touchpad_scroll_ms{ 0 };
 
     GLVolumeCollection m_paint_outline_volumes;
     GLVolumeCollection m_volumes;
@@ -693,6 +692,7 @@ private:
 
     //BBS:add plate related logic
     mutable std::vector<int> m_hover_volume_idxs;
+    int m_hover_volume_idx_before_gizmo{ -1 };
     std::vector<int> m_hover_plate_idxs;
     //BBS if explosion_ratio is changed, need to update volume bounding box
     mutable float m_explosion_ratio = 1.0;
@@ -874,6 +874,10 @@ public:
     unsigned int get_volumes_count() const;
     const GLVolumeCollection& get_volumes() const { return m_volumes; }
     void reset_volumes(bool set_notice = true);
+    // Keep the GLVolumes usable across a Model::delete_object(obj_idx) that the scene has not been
+    // reloaded for yet. Call it right before the deletion; see the definition for what it does and
+    // when it is needed.
+    void reindex_volumes_for_object_removal(int obj_idx);
     ModelInstanceEPrintVolumeState check_volumes_outside_state(ObjectFilamentResults* object_results = nullptr) const;
     bool is_all_plates_selected() { return m_sel_plate_toolbar.m_all_plates_stats_item && m_sel_plate_toolbar.m_all_plates_stats_item->selected; }
     bool is_volumes_selected_and_sinking() const;
@@ -890,12 +894,19 @@ public:
     void toggle_model_objects_visibility(bool visible, const ModelObject* mo = nullptr, int instance_idx = -1, const ModelVolume* mv = nullptr);
     void update_instance_printable_state_for_object(size_t obj_idx);
     void update_instance_printable_state_for_objects(const std::vector<size_t>& object_idxs);
+    // Warn when every instance on the current plate is marked unprintable.
+    void update_all_objects_unprintable_warning();
 
     void set_config(const DynamicPrintConfig* config);
     void set_process(BackgroundSlicingProcess* process);
     void set_model(Model* model);
 
     void active_view();
+    // Recompute primary/isolated bounds from the volumes currently posed on this canvas,
+    // then close or replace the isolated-volume notification to match.
+    void _rebuild_assembly_bvh_from_canvas();
+    // Close the isolated-volume popup when the list is empty, otherwise replace it with the current names.
+    void refresh_isolated_volumes_notification();
     bool is_assembly_guide_node_selected() const;
     AssemblyStepsUtils *get_assembly_steps() { return m_assembly_steps.get(); }
     const AssemblyStepsUtils *get_assembly_steps() const { return m_assembly_steps.get(); }
@@ -942,6 +953,11 @@ public:
     void                                set_use_color_clip_plane(bool use) { m_volumes.set_use_color_clip_plane(use); }
     void                                set_color_clip_plane(const Vec3d &cp_normal, double offset) { m_volumes.set_color_clip_plane(cp_normal, offset); }
     void                                set_color_clip_plane_colors(const std::array<ColorRGBA, 2> &colors) { m_volumes.set_color_clip_plane_colors(colors); }
+    void                                set_use_dovetail_clip(bool use) { m_volumes.set_use_dovetail_clip(use); }
+    void                                set_dovetail_clip(const Transform3d &world_to_groove, const Vec4f &params, const Vec2f &tolerance)
+    {
+        m_volumes.set_dovetail_clip(world_to_groove, params, tolerance);
+    }
 
     // Volume color override methods (for mesh boolean gizmo)
     void set_use_volume_color_override(bool use) { m_volumes.set_use_volume_color_override(use); }
@@ -977,6 +993,7 @@ public:
     bool is_reload_delayed() const;
 
     void enable_layers_editing(bool enable);
+    void release_layers_editing_toolbar_item();
     void enable_legend_texture(bool enable);
     void enable_picking(bool enable);
     void enable_moving(bool enable);
@@ -1055,6 +1072,7 @@ public:
         // Identify volumes by index / name only: GLVolume* would dangle after reload/reset.
         int                obj_idx      = -1;
         int                instance_idx = -1;
+        int                volume_idx   = -1;
         std::string        name;
         BoundingBoxf3      world_box_assembly;
         AssemblePoseTarget target;
@@ -1065,8 +1083,12 @@ public:
     static void                            clear_isolated_volumes_cache();
     static int                             s_assemble_candidate_volumes_size;
     static bool                            s_isolated_notification_shown;
-    static bool                            s_intersects_notification_shown;
     static int                             s_assemble_ratio;
+    // Same ratio as the assemble canvas, from world AABBs. No canvas, OpenGL, or notifications.
+    // 0 when there are fewer than two parts or the expanded boxes do not intersect.
+    static int compute_assemble_ratio(const std::vector<GLVolume *> &             volumes,
+                                      const std::vector<BoundingBoxf3> &          boxes,
+                                      const std::vector<AssemblePoseTarget> &     targets);
     static int                             s_assemble_volume_ratio;
     static bool                            s_far_from_origin_notification_shown;
     static BoundingBoxf3                   s_bvh_primary_bounds;
@@ -1225,6 +1247,7 @@ public:
 
     int get_move_volume_id() const { return m_mouse.drag.move_volume_idx; }
     int get_first_hover_volume_idx() const { return m_hover_volume_idxs.empty() ? -1 : m_hover_volume_idxs.front(); }
+    int get_hover_volume_idx_before_gizmo() const { return m_hover_volume_idx_before_gizmo; }
     void set_selected_extruder(int extruder) { m_selected_extruder = extruder;}
 
     class WipeTowerInfo {
@@ -1298,15 +1321,7 @@ public:
     void highlight_gizmo(const std::string& gizmo_name);
 
     // Timestamp for FPS calculation and notification fade-outs.
-    static int64_t timestamp_now() {
-#ifdef _WIN32
-        // Cheaper on Windows, calls GetSystemTimeAsFileTime()
-        return wxGetUTCTimeMillis().GetValue();
-#else
-        // calls clock()
-        return wxGetLocalTimeMillis().GetValue();
-#endif
-    }
+    static int64_t timestamp_now() { return canvas_timestamp_now(); }
 
     void reset_sequential_print_clearance() {
         m_sequential_print_clearance.set_visible(false);
@@ -1382,7 +1397,10 @@ private:
     BoundingBoxf3 _max_bounding_box(bool include_gizmos, bool include_bed_model, bool include_plates, bool volumes_limit_to_expand_plate) const;
 
     void _zoom_to_box(const BoundingBoxf3& box, double margin_factor = DefaultCameraZoomToBoxMarginFactor);
-    void _update_camera_zoom(double zoom);
+    void _update_camera_zoom(double target_zoom, const Point& anchor);
+    // Selection bbox center, else current plate center. Nullopt if neither is available.
+    std::optional<Vec3d> _get_camera_orbit_target() const;
+    bool _allow_canvas_drag_move() const;
     void _refresh_if_shown_on_screen();
     // Shared body of the idle-driven UI-state refresh + render. Returns true if
     // another frame is wanted (camera/imgui/3d-mouse still animating). Driven by

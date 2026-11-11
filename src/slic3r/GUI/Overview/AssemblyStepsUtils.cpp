@@ -14,18 +14,18 @@
 #include "../GUI_App.hpp"
 #include "../GUI.hpp"
 #include "../GUI_ObjectList.hpp"
-#include "../GLCanvas3D.hpp"
 #include "../MainFrame.hpp"
 #include "../Plater.hpp"
 #include "../MsgDialog.hpp"
 #include "../NotificationManager.hpp"
 #include "../OpenGLManager.hpp"
+#include "../3DScene.hpp"
+#include "../FilamentBitmapUtils.hpp"
 #include "../imgui/imgui_stdlib.h"
 #include "../MP4/PBOReader.hpp"
 #include "../MP4/Mp4Recorder.hpp"
 
 #include <boost/format.hpp>
-#include <boost/log/trivial.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/nowide/cstdio.hpp>
 #include <boost/nowide/fstream.hpp>
@@ -42,6 +42,7 @@
 #include <GL/glew.h>
 #include <wx/glcanvas.h>
 #include <imgui/imgui_internal.h>
+#include "libslic3r/Log.hpp"
 
 #define _steps_nodes m_model->get_assembly_steps_tree_data().nodes
 #define _steps_roots m_model->get_assembly_steps_tree_data().roots
@@ -93,6 +94,24 @@ std::string sanitize_export_output_path(const std::string &path, const std::stri
         stem = fallback_stem.empty() ? "Assembly Guide" : fallback_stem;
     output_path = output_path.parent_path() / (stem + extension);
     return output_path.string();
+}
+
+// Viewport filament alpha (transparent slots stay slightly visible).
+float filament_render_alpha_for_volume(const GLVolume *vol)
+{
+    if (!vol)
+        return 1.f;
+    std::vector<wxColour> colors;
+    bool                  is_gradient  = false;
+    int                   filament_idx = vol->extruder_id - 1;
+    if (filament_idx < 0)
+        filament_idx = 0;
+    get_filament_colors_by_id(filament_idx, colors, is_gradient);
+    if (colors.empty())
+        return 1.f;
+    const wxColour &c = colors.front();
+    const std::array<float, 4> rgba = {c.Red() / 255.f, c.Green() / 255.f, c.Blue() / 255.f, c.Alpha() / 255.f};
+    return adjust_color_for_rendering(rgba)[3];
 }
 
 // Locate a model-part volume by stable part_guid. Returns false when not found.
@@ -750,6 +769,13 @@ void AssemblyStepsUtils::save_assembly_steps_json_to_model()
     if (plater->is_assemble_undo_stack_active())
         plater->take_snapshot("Edit Assembly Guide");
     m_model->set_assembly_steps_json_str(json_str);
+    // The loaded judgment no longer matches the edited steps. The next 3mf save recomputes it.
+    AssemblyStepsFileMeta meta = m_model->loaded_assembly_steps_meta();
+    if (meta.has_qualified || meta.qualified) {
+        meta.has_qualified = false;
+        meta.qualified     = false;
+        m_model->note_loaded_assembly_steps_meta(meta);
+    }
     plater->set_plater_dirty(true);
 }
 
@@ -2099,6 +2125,94 @@ bool AssemblyStepsUtils::merged_steps_cover_whole_model(const std::vector<int> &
     // Every baseline part must be present. Covering more than the baseline (parts
     // added after it was recorded) still counts as the whole model.
     return std::includes(covered.begin(), covered.end(), expected.begin(), expected.end());
+}
+
+bool AssemblyStepsUtils::mark_step_final_assembly_if_all_objects_checked(
+    int folder_idx,
+    const AssemblyTreeData &tree,
+    const std::unordered_map<std::string, bool> &checked)
+{
+    if (!m_model || folder_idx < 0 || folder_idx >= (int) _steps_nodes.size())
+        return false;
+    if (_steps_nodes[folder_idx].type != AssemblyStepsTreeNode::Type::Folder)
+        return false;
+    if (_steps_nodes[folder_idx].is_final_assembly == AssemblyStepKind::OverallPreview)
+        return false;
+
+    auto is_checked = [&](const std::string &uid) {
+        auto it = checked.find(uid);
+        return it != checked.end() && it->second;
+    };
+
+    std::set<int> listed_objects;
+    bool all_rows_checked = true;
+    for (const auto &node : tree.nodes) {
+        if (!node.selectable || node.object_idx < 0 || node.volume_idx >= 0)
+            continue;
+        listed_objects.insert(node.object_idx);
+        if (is_checked(node.uid))
+            continue;
+        // Object row can show All from its volumes without storing the object uid.
+        bool has_volume = false;
+        bool all_volumes = true;
+        for (int child_idx : node.children) {
+            if (child_idx < 0 || child_idx >= (int) tree.nodes.size())
+                continue;
+            const auto &child = tree.nodes[child_idx];
+            if (!child.selectable || child.volume_idx < 0)
+                continue;
+            has_volume = true;
+            if (!is_checked(child.uid)) {
+                all_volumes = false;
+                break;
+            }
+        }
+        if (!(has_volume && all_volumes))
+            all_rows_checked = false;
+    }
+
+    // Confirm writes checked objects onto the step before this runs. Covering every
+    // listed object is the same "all objects checked" result when a parent uid was
+    // left unset.
+    std::set<int> step_objects;
+    for (int child_idx : _steps_nodes[folder_idx].children) {
+        if (child_idx < 0 || child_idx >= (int) _steps_nodes.size())
+            continue;
+        const auto &child = _steps_nodes[child_idx];
+        if (child.type == AssemblyStepsTreeNode::Type::Object && child.object_idx >= 0)
+            step_objects.insert(child.object_idx);
+    }
+    bool covers_listed = !listed_objects.empty();
+    for (int object_idx : listed_objects) {
+        if (!step_objects.count(object_idx)) {
+            covers_listed = false;
+            break;
+        }
+    }
+    const bool all_objects_checked = !listed_objects.empty() && (all_rows_checked || covers_listed);
+    const bool already_final = _steps_nodes[folder_idx].is_final_assembly == AssemblyStepKind::FinalAssembly;
+    if (!all_objects_checked) {
+        if (!already_final)
+            return false;
+        _steps_nodes[folder_idx].is_final_assembly = AssemblyStepKind::Normal;
+    } else if (!already_final) {
+        _steps_nodes[folder_idx].is_final_assembly = AssemblyStepKind::FinalAssembly;
+    }
+
+    // Multiple final-assembly steps are allowed; do not demote existing ones.
+    // for (int ri : _steps_roots) {
+    //     if (ri < 0 || ri >= (int) _steps_nodes.size() || ri == folder_idx)
+    //         continue;
+    //     if (_steps_nodes[ri].is_final_assembly == AssemblyStepKind::FinalAssembly)
+    //         _steps_nodes[ri].is_final_assembly = AssemblyStepKind::Normal;
+    // }
+    // Coalesced confirm skips save_assembly_steps_json_to_model() until a later flush.
+    // The 3mf writer reads that string, so persist the flag here or the file keeps 0.
+    const bool was_skipping_save = m_skip_assembly_steps_save;
+    m_skip_assembly_steps_save = false;
+    save_assembly_steps_json_to_model();
+    m_skip_assembly_steps_save = was_skipping_save;
+    return true;
 }
 
  void AssemblyStepsUtils::add_selected_to_assembly_step(int folder_idx) {
@@ -3959,8 +4073,8 @@ std::string AssemblyStepsUtils::generate_output_path(ExportType type)
 wxWindow* AssemblyStepsUtils::assembly_export_progress_anchor() const
 {
     if (wxGetApp().plater()) {
-        if (GLCanvas3D *canvas = wxGetApp().plater()->get_assmeble_canvas3D())
-            return canvas->get_wxglcanvas();
+        if (wxWindow *canvas = wxGetApp().plater()->get_assemble_wxglcanvas())
+            return canvas;
     }
     return wxGetApp().mainframe;
 }
@@ -3968,6 +4082,8 @@ wxWindow* AssemblyStepsUtils::assembly_export_progress_anchor() const
 void AssemblyStepsUtils::show_assembly_export_progress(ExportType type, const std::string &path, int value, int maximum)
 {
     update_assembly_export_progress(type, path, value, maximum);
+    if (m_export_progress_window)
+        m_export_progress_window->enable_cancel(true);
 }
 
 void AssemblyStepsUtils::update_assembly_export_progress(ExportType type, const std::string &path, int value, int maximum)
@@ -3976,8 +4092,10 @@ void AssemblyStepsUtils::update_assembly_export_progress(ExportType type, const 
     if (!anchor)
         return;
 
-    if (!m_export_progress_window)
+    if (!m_export_progress_window) {
         m_export_progress_window = std::make_unique<AssemblyExportProgressWindow>(wxGetApp().mainframe);
+        m_export_progress_window->set_cancel_callback([this]() { cancel_assembly_export(); });
+    }
 
     const wxString filename = path.empty()
         ? wxString()
@@ -3993,6 +4111,54 @@ void AssemblyStepsUtils::hide_assembly_export_progress()
 {
     if (m_export_progress_window)
         m_export_progress_window->Hide();
+}
+
+void AssemblyStepsUtils::cancel_assembly_export()
+{
+    if (!m_steps_export_active && !m_steps_video_export_active)
+        return;
+
+    BOOST_LOG_TRIVIAL(info) << "assembly steps export: cancelled";
+
+    if (m_steps_video_export_active) {
+        if (m_mp4_recorder && m_mp4_recorder->is_recording())
+            m_mp4_recorder->stop();
+        m_video_recording               = false;
+        m_video_export_skip_first_frame = false;
+        m_steps_video_export_active     = false;
+        m_is_export_mode                = false;
+        pause_global_frame();
+        if (!m_steps_video_export_path.empty()) {
+            boost::system::error_code ec;
+            boost::filesystem::remove(m_steps_video_export_path, ec);
+            m_steps_video_export_path.clear();
+        }
+    }
+
+    if (m_steps_export_active) {
+        m_steps_export_active     = false;
+        m_steps_export_wait_frame = false;
+        m_is_export_mode          = false;
+
+        const int orig = m_steps_export_original_play_index;
+        if (orig >= 1 && orig <= m_steps_export_total)
+            goto_global_frame(orig);
+        else {
+            m_selected_node     = m_steps_export_original_selected_node;
+            m_keyframe_selected = -1;
+            on_selected_node_changed();
+        }
+
+        m_steps_export_total = 0;
+        m_steps_export_images.clear();
+        m_steps_export_titles.clear();
+        m_steps_export_step_indices.clear();
+        m_steps_export_output_path.clear();
+    }
+
+    hide_assembly_export_progress();
+    do_commond_callback("dirty");
+    do_commond_callback("request_extra_frame");
 }
 
 void AssemblyStepsUtils::on_export_pdf(std::string path)
@@ -4285,6 +4451,8 @@ void AssemblyStepsUtils::process_assembly_steps_export()
 
 void AssemblyStepsUtils::finalize_steps_export()
 {
+    if (m_export_progress_window)
+        m_export_progress_window->enable_cancel(false);
     update_assembly_export_progress(m_steps_export_type, m_steps_export_output_path, m_steps_export_total, m_steps_export_total);
     wxBusyCursor busy;
     if (m_steps_export_type == ExportType::MarkDown) {
@@ -5624,10 +5792,17 @@ std::string AssemblyStepsUtils::build_steps_json_string()
     }
 
     assmeble_steps_json.set_items(std::move(items));
+    std::string json_str = assmeble_steps_json.to_json_string();
+    // Keep a loaded version above the one to_json_string() writes.
+    if (m_model) {
+        const AssemblyStepsFileMeta meta = m_model->loaded_assembly_steps_meta();
+        if (!assembly_steps_version_needs_recompute(meta.version))
+            json_str = assembly_steps_json_with_version(json_str, meta.version);
+    }
 #if !BBL_RELEASE_TO_PUBLIC // for debug
     assmeble_steps_json.save(AssemblyStepJson::get_debug_file_path());
 #endif
-    return assmeble_steps_json.to_json_string();
+    return json_str;
 }
 
 void AssemblyStepsUtils::sync_steps_objects_with_model()
@@ -6075,6 +6250,7 @@ bool AssemblyStepsUtils::allow_sync_in_assemble_view()
 {
     if (m_only_final_assembly_endframe_effect_real_assembly) {
         if (!has_selected_node()) {
+            do_commond_callback("rebuild_assembly_bvh");
             return true;
         }
         if (!has_selected_final_assembly_end_keyframe()) {
@@ -6082,6 +6258,8 @@ bool AssemblyStepsUtils::allow_sync_in_assemble_view()
             return false;
         }
     }
+    // This edit is written onto the real assemble pose. The prepare-view BVH is then stale.
+    do_commond_callback("rebuild_assembly_bvh");
     return true;
 }
 
@@ -6580,6 +6758,7 @@ void AssemblyStepsUtils::update_part_number_label_font_size_from_config()
             ASSEMBLY_LABEL_DEFAULT_FONT_SIZE,
             ASSEMBLY_LABEL_DEFAULT_FONT_SIZE * ASSEMBLY_LABEL_MAX_FONT_SIZE_FACTOR);
     } catch (...) {
+        BOOST_LOG_TRIVIAL(warning) << current_exception_message();
         m_part_number_label_font_size = 0.0f;
     }
 }
@@ -9345,7 +9524,8 @@ void AssemblyStepsUtils::show_all_volume_normal_render() {
         for (GLVolume *vol : m_volumes->volumes) {
             if (!vol)
                 continue;
-            apply_glvolume_state(vol, {/*active=*/true, /*alpha=*/1.f, /*force_native_color=*/false});
+            apply_glvolume_state(vol, {/*active=*/true, /*alpha=*/filament_render_alpha_for_volume(vol),
+                                       /*force_native_color=*/false});
         }
     }
     if (!m_model)
@@ -9387,6 +9567,13 @@ void AssemblyStepsUtils::apply_keyframe_display_mode()
         return;
 
     auto &step_nodes = m_model->get_assembly_steps_tree_data().nodes;
+    // Overall preview / final assembly always show the full model with filament
+    // alpha. X-Ray / OnlyCurrentStep would flatten transparency or dim the scene.
+    if (is_overall_preview_mode() || is_selected_final_assembly_node()) {
+        show_all_volume_normal_render();
+        do_commond_callback("dirty");
+        return;
+    }
     if (is_empty_structure_step(m_selected_node)) {
         show_volumes_as_step_candidates();
         return;
@@ -9415,7 +9602,9 @@ void AssemblyStepsUtils::apply_keyframe_display_mode()
                     if (!vol)
                         continue;
                     const bool is_current = current_vols.count({vol->object_idx(), vol->volume_idx()}) > 0;
-                    apply_glvolume_state(vol, {is_current, is_current ? 1.f : 0.f, !is_current});
+                    apply_glvolume_state(vol, {is_current,
+                                               is_current ? filament_render_alpha_for_volume(vol) : 0.f,
+                                               !is_current});
                 }
             }
         } else {
@@ -9453,7 +9642,8 @@ void AssemblyStepsUtils::apply_tree_checked_display_mode(const AssemblyTreeData&
 {
     if (!m_model || !m_volumes)
         return;
-    if (m_keyframe_display_mode == KeyframeDisplayMode::All) {
+    if (m_keyframe_display_mode == KeyframeDisplayMode::All ||
+        is_overall_preview_mode() || is_selected_final_assembly_node()) {
         show_all_volume_normal_render();
         do_commond_callback("dirty");
         return;
@@ -9498,8 +9688,10 @@ void AssemblyStepsUtils::apply_tree_checked_display_mode(const AssemblyTreeData&
         const bool is_current = checked_vols.count({vol->object_idx(), vol->volume_idx()}) > 0;
         if (highlight)
             apply_glvolume_state(vol, {true, is_current ? 1.f : 0.15f, !is_current});
-        else // OnlyCurrentStep
-            apply_glvolume_state(vol, {is_current, is_current ? 1.f : 0.f, !is_current});
+        else // OnlyCurrentStep: keep filament alpha on visible parts
+            apply_glvolume_state(vol, {is_current,
+                                       is_current ? filament_render_alpha_for_volume(vol) : 0.f,
+                                       !is_current});
     }
     do_commond_callback("dirty");
 }
@@ -9518,7 +9710,7 @@ KeyFrame AssemblyStepsUtils::interpolate_keyframe(
     const bool from_empty = from.object_transformations.empty() && from.volume_transformations.empty();
     const bool to_empty   = to.object_transformations.empty()   && to.volume_transformations.empty();
     if (from_empty || to_empty) {
-        BOOST_LOG_TRIVIAL(warning) << "interpolate_keyframe: empty keyframe transforms (from_empty=" << from_empty << ", to_empty=" << to_empty << "), skip interpolation";
+        BOOST_LOG_TRIVIAL(warning) << "empty keyframe transforms (from_empty=" << from_empty << ", to_empty=" << to_empty << "), skip interpolation";
 #if !BBL_RELEASE_TO_PUBLIC
 #ifdef _WIN32
         __debugbreak();
@@ -10143,7 +10335,7 @@ bool AssemblyStepsUtils::capture_assembly_screenshot_to_png(const std::string &f
 
     // write_gl_rgba_to_file() already flips GL bottom-to-top rows.
     const bool ok = Slic3r::png::write_gl_rgba_to_file(filename.c_str(), w, h, pixels.data());
-    BOOST_LOG_TRIVIAL(info) << "capture_assembly_screenshot_to_png: screenshot saved to " << filename << ", ok=" << ok;
+    BOOST_LOG_TRIVIAL(info) << "screenshot saved to " << filename << ", ok=" << ok;
     return ok;
 }
 

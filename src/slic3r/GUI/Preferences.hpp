@@ -41,7 +41,7 @@ public:
 WX_DECLARE_LIST(RadioSelector, RadioSelectorList);
 class CheckBox;
 class TextInput;
-class PreferenceTabbar;
+class TextTabbar;
 
 class PreferencesDialog : public DPIDialog
 {
@@ -49,7 +49,7 @@ private:
     AppConfig *app_config;
 
 protected:
-    PreferenceTabbar *m_tabbar = nullptr;
+    TextTabbar       *m_tabbar = nullptr;
     wxSimplebook *    m_book   = nullptr;
 
     bool m_seq_top_layer_only_changed{false};
@@ -81,6 +81,11 @@ public:
     ::CheckBox * m_developer_mode_ckeckbox   = {nullptr};
     ::CheckBox * m_internal_developer_mode_ckeckbox = {nullptr};
     ::CheckBox * m_dark_mode_ckeckbox        = {nullptr};
+    ::CheckBox * m_privacy_checkbox          = {nullptr};
+
+    // Re-apply the minor UEP lock to the "Join User Experience Program" checkbox
+    // after an async decision update, so an open Preferences page reflects it live.
+    void refresh_privacy_checkbox();
 
     wxString m_developer_mode_def;
     wxString m_internal_developer_mode_def;
@@ -91,7 +96,14 @@ public:
     // ComboBoxSelectorList    m_comxbo_group;
 
     wxBoxSizer *create_item_title(wxString title, wxWindow *parent, wxString tooltip);
-    wxBoxSizer *create_item_combobox(wxString title, wxWindow *parent, wxString tooltip, std::string param,const std::vector<wxString>& label_list, const std::vector<std::string>& value_list, std::function<void(int)> callback = nullptr);
+    wxBoxSizer *create_item_combobox(wxString                        title,
+                                     wxWindow                       *parent,
+                                     wxString                        tooltip,
+                                     std::string                     param,
+                                     const std::vector<wxString>    &label_list,
+                                     const std::vector<std::string> &value_list,
+                                     const std::vector<wxString>    &tooltip_list = {},
+                                     std::function<void(int)>        callback     = nullptr);
     wxBoxSizer *create_item_region_combobox(wxString title, wxWindow *parent, wxString tooltip, std::vector<wxString> vlist);
     wxBoxSizer *create_item_language_combobox(wxString title, wxWindow *parent, wxString tooltip, int padding_left, std::string param, std::vector<const wxLanguageInfo *> vlist);
     wxBoxSizer *create_item_loglevel_combobox(wxString title, wxWindow *parent, wxString tooltip, std::vector<wxString> vlist);
@@ -100,6 +112,7 @@ public:
     void        set_dark_mode();
     wxWindow* create_item_downloads(wxWindow* parent, int padding_left, std::string param);
     wxBoxSizer *create_item_input(wxString title, wxString title2, wxWindow *parent, wxString tooltip, std::string param, std::function<void(wxString)> onchange = {});
+    wxBoxSizer *create_item_int_slider(wxString title, wxWindow *parent, wxString tooltip, std::string param, int range_min, int range_max, int default_value);
     wxBoxSizer *create_item_range_input(
         wxString title, wxWindow *parent, wxString tooltip, std::string param, float range_min, float range_max, int keep_digital,std::function<void(wxString)> onchange = {});
     wxBoxSizer *create_item_range_two_input(wxString                      title,

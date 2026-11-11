@@ -2,6 +2,7 @@
 #define SLIC3R_FILAMENT_MIXER_HPP
 
 #include <limits>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -129,6 +130,13 @@ std::vector<size_t> check_mixed_filament_type_consistency(
     const std::vector<unsigned char> &is_mixed,
     const std::vector<std::string>   &comp_strs,
     const std::vector<std::string>   &filament_types);
+
+// Check which mixed filament slots reference physical components assigned to different nozzle diameters.
+// An all-empty diameter vector is the legacy/single-diameter state and is considered consistent.
+std::vector<size_t> check_mixed_filament_diameter_consistency(
+    const std::vector<unsigned char> &is_mixed,
+    const std::vector<std::string>   &comp_strs,
+    const std::vector<std::string>   &filament_diameters);
 
 // Expand mixed-slot IDs in geometric unprintable sets to their physical component IDs.
 // Each set entry that corresponds to a mixed slot is replaced by the slot's component

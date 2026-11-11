@@ -57,11 +57,14 @@ test('E-Core updater downloads only a hashed installer and starts it hidden', ()
     assert.match(http, /download_file->write/);
 });
 
-test('fork revision is bumped for the final verified updater release', () => {
+test('fork metadata and compiled updater version agree', () => {
     const state = JSON.parse(read('printfins-fork.json'));
     const version = read('src/slic3r/GUI/ForkVersion.hpp');
-    assert.equal(state.fork_revision, 8);
-    assert.equal(state.fork_version, '02.08.02.61-ecore.8');
-    assert.match(version, /revision = 8/);
-    assert.match(version, /02\.08\.02\.61-ecore\.8/);
+    assert.ok(Number.isInteger(state.fork_revision) && state.fork_revision > 0);
+    assert.equal(state.fork_version, `${state.upstream_version}-ecore.${state.fork_revision}`);
+    assert.equal(state.upstream_tag, `v${state.upstream_version}`);
+    assert.ok(version.includes(`revision = ${state.fork_revision};`));
+    assert.ok(version.includes(`upstream_version = "${state.upstream_version}";`));
+    assert.ok(version.includes(`display = "${state.fork_version}";`));
+    assert.ok(read('version.inc').includes(`"${state.upstream_version}"`));
 });

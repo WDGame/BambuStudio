@@ -37,7 +37,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Get the version and date on Ubuntu and macOS
-        if: inputs.os != 'windows-latest'
+        if: ${{ !startsWith(inputs.os, 'windows') }}
         run: |
           ver_pure=$(grep 'set(SLIC3R_VERSION' version.inc | cut -d '"' -f2)
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -51,7 +51,7 @@ jobs:
         shell: bash
 
       - name: Get the version and date on Windows
-        if: inputs.os == 'windows-latest'
+        if: startsWith(inputs.os, 'windows')
         run: |
           $date = Get-Date -Format 'yyyyMMdd'
           $ref = "${{ github.ref }}"
@@ -114,11 +114,11 @@ jobs:
 
   # Windows
       - name: setup MSVC
-        if: inputs.os == 'windows-latest'
+        if: startsWith(inputs.os, 'windows')
         uses: microsoft/setup-msbuild@v2
 
       - name: Install nsis and pkgconfig
-        if: inputs.os == 'windows-latest'
+        if: startsWith(inputs.os, 'windows')
         run: |
           dir "C:/Program Files (x86)/Windows Kits/10/Include"
           choco install nsis
@@ -148,6 +148,46 @@ jobs:
           cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DBBL_REQUIRE_WIN10SDK=ON -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="$env:WIN10SDK_PATH"
           cmake --build . --target install --config Release -- -m
 
+      - name: Run native PrintFins and overhang regression tests
+        if: inputs.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cmake -S . -B build -DSLIC3R_BUILD_TESTS=ON
+          if ($LASTEXITCODE -ne 0) { throw "Native test configuration failed" }
+          cmake --build build --target printfins_integration_tests --config Release -- -m
+          if ($LASTEXITCODE -ne 0) { throw "Native regression test compilation failed" }
+          $env:PATH = "$env:GITHUB_WORKSPACE\install-dir;$env:GITHUB_WORKSPACE\deps\build\BambuStudio_dep\usr\local\bin;$env:PATH"
+          & "$env:GITHUB_WORKSPACE\build\tests\libslic3r\Release\printfins_integration_tests.exe" '[PrintFins],[Overhang]'
+          if ($LASTEXITCODE -ne 0) { throw "Native PrintFins/overhang regression tests failed" }
+
+      - name: Verify Windows executable and 3D Repair before packaging
+        if: inputs.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE "install-dir\bambu-studio.exe"
+          $dll = Join-Path $env:GITHUB_WORKSPACE "install-dir\BambuStudio.dll"
+          $state = Get-Content "printfins-fork.json" -Raw | ConvertFrom-Json
+          if ([version](Get-Item $exe).VersionInfo.FileVersion -ne [version]$state.upstream_version) {
+            throw "Windows binary version differs from the release metadata"
+          }
+          $bytes = [IO.File]::ReadAllBytes($dll)
+          $symbols = [Text.Encoding]::ASCII.GetString($bytes) + [Text.Encoding]::Unicode.GetString($bytes)
+          if (-not $symbols.Contains("Windows.Graphics.Printing3D")) {
+            throw "Windows 3D Repair implementation is missing from BambuStudio.dll"
+          }
+          $stdout = Join-Path $env:RUNNER_TEMP "ecore-help.txt"
+          $stderr = Join-Path $env:RUNNER_TEMP "ecore-help-errors.txt"
+          $smoke = Start-Process -FilePath $exe -ArgumentList '--help' -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (-not $smoke.WaitForExit(90000)) {
+            Stop-Process -Id $smoke.Id -Force
+            throw "Windows command-line startup timed out"
+          }
+          if ($smoke.ExitCode -ne 0) {
+            Get-Content $stderr
+            throw "Windows command-line startup failed: $($smoke.ExitCode)"
+          }
+          Get-Content $stdout
+
       - name: Create E-Core installer Win
         if: inputs.os == 'windows-latest'
         working-directory: ${{ github.workspace }}
@@ -159,12 +199,37 @@ jobs:
           & $makensis "/DSOURCE_DIR=$env:GITHUB_WORKSPACE\install-dir" "/DOUTPUT_FILE=$env:GITHUB_WORKSPACE\$installer" "/DPRODUCT_VERSION=$($state.fork_version)" "/DPRODUCT_FILE_VERSION=$($state.upstream_version)" "$env:GITHUB_WORKSPACE\packaging\windows\ecore-installer.nsi"
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
           "installer=$installer" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+      # Windows on ARM64/ARM64EC: VS 2022 generator (the arm runner has no VS
+      # 2026), and the newest installed 10.* SDK is resolved at runtime rather
+      # than pinned, since the arm image may not ship the exact SDK the x64 job
+      # hard-codes. arm64ec produces the variant that can load the x64-only
+      # Bambu network plugin in-process at native speed.
+      - name: Build slicer Win ARM64/ARM64EC
+        if: inputs.os == 'windows-11-arm'
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $sdkRoot = "C:/Program Files (x86)/Windows Kits/10/Include"
+          $sdk = (Get-ChildItem $sdkRoot -Directory | Where-Object { $_.Name -match '^10\.' } | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          Write-Output "Using Windows SDK: $sdk"
+          $platform = "${{ inputs.arch }}" -eq "arm64ec" ? "ARM64EC" : "ARM64"
+          mkdir build
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A $platform -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="$sdk"
+          cmake --build . --target install --config Release -- -m
+
 
       - name: Pack app
         if: inputs.os == 'windows-latest'
         working-directory: ${{ github.workspace }}
         shell: cmd
         run: '"C:/Program Files/7-Zip/7z.exe" a -tzip BambuStudio_Windows_${{ env.ver }}_portable.zip ${{ github.workspace }}/install-dir'
+
+      - name: Pack app ARM64
+        if: inputs.os == 'windows-11-arm'
+        working-directory: ${{ github.workspace }}
+        shell: cmd
+        run: '"C:/Program Files/7-Zip/7z.exe" a -tzip BambuStudio_Windows_${{ env.ver }}_${{ inputs.arch }}_portable.zip ${{ github.workspace }}/install-dir'
 
       # - name: Pack PDB
       #   if: inputs.os == 'windows-latest'
@@ -180,6 +245,13 @@ jobs:
           path: |
             ${{ github.workspace }}/BambuStudio_Windows_${{ env.ver }}_portable.zip
             ${{ github.workspace }}/${{ env.installer }}
+
+      - name: Upload artifacts Win ARM64 zip
+        if: inputs.os == 'windows-11-arm'
+        uses: actions/upload-artifact@v6
+        with:
+          name: BambuStudio_Windows_${{ env.ver }}_${{ inputs.arch }}_portable
+          path: ${{ github.workspace }}/BambuStudio_Windows_${{ env.ver }}_${{ inputs.arch }}_portable.zip
 
 
   # Ubuntu
