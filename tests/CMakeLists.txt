@@ -53,6 +53,29 @@ add_subdirectory(filament_group)
 add_subdirectory(nozzle_inventory)
 add_subdirectory(libslic3r_utils)
 
+# Register the focused gate outside the legacy EXCLUDE_FROM_ALL directory.
+# Visual Studio must include this project in the root solution for --target.
+# The current 3MF path also uses host utilities from libslic3r_gui.
+if (TARGET libslic3r_gui)
+# Focused native configuration/3MF regressions without unrelated SLA test APIs.
+add_executable(printfins_integration_tests
+    libslic3r/libslic3r_tests.cpp
+    printfins/native-options-group.cpp
+)
+target_link_libraries(printfins_integration_tests test_gui)
+target_include_directories(printfins_integration_tests PRIVATE "$<TARGET_PROPERTY:libslic3r_gui,INCLUDE_DIRECTORIES>")
+if (MSVC)
+    target_link_options(printfins_integration_tests PRIVATE /DEBUG:FULL /OPT:REF /OPT:ICF)
+endif()
+if (WIN32)
+    target_link_libraries(printfins_integration_tests bcrypt)
+endif()
+set_target_properties(printfins_integration_tests PROPERTIES
+    FOLDER "tests"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libslic3r"
+)
+endif()
+
 # These suites were not kept in sync with libslic3r after the fork and no longer compile.
 # They are left out of the default build; build a target explicitly to work on reviving it.
 add_subdirectory(libnest2d EXCLUDE_FROM_ALL)
