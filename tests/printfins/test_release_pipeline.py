@@ -103,6 +103,22 @@ class ReleasePipelineTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     PROMOTE.merged_commit('owner/repo', '1', {'merged': True}, expected)
 
+    def test_draft_assets_use_release_id_not_unavailable_tag_endpoint(self):
+        from subprocess import CompletedProcess
+        responses = [CompletedProcess([], 0, json.dumps({'databaseId': 123, 'tagName': 'vtest'})),
+                     CompletedProcess([], 0, json.dumps({'tag_name': 'vtest', 'assets': [{'name': 'test'}]}))]
+        with patch.object(PUBLISH, 'run', side_effect=responses) as command:
+            self.assertEqual(PUBLISH.release_assets('owner/repo', 'vtest'), [{'name': 'test'}])
+            self.assertEqual(command.call_args.args, ('gh', 'api', 'repos/owner/repo/releases/123'))
+
+    def test_draft_lookup_rejects_mismatched_release_tag(self):
+        from subprocess import CompletedProcess
+        response = CompletedProcess([], 0, json.dumps({'databaseId': 123, 'tagName': 'wrong'}))
+        with patch.object(PUBLISH, 'run', return_value=response) as command:
+            with self.assertRaisesRegex(ValueError, 'another tag'):
+                PUBLISH.release_assets('owner/repo', 'vtest')
+            self.assertEqual(command.call_count, 1)
+
     def test_assets_are_verified_before_upload_and_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
