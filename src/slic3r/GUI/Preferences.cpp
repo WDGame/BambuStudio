@@ -12,6 +12,7 @@
 #include <cassert>
 #include <string>
 #include <vector>
+#include <wx/string.h>
 #include <wx/tokenzr.h>
 #include <wx/event.h>
 #include <wx/gdicmn.h>
@@ -19,11 +20,14 @@
 #include "OG_CustomCtrl.hpp"
 #include "fila_manager/wgtFilaManagerFeature.h"
 #include "slic3r/GUI/Widgets/Label.hpp"
+#include "slic3r/GUI/Widgets/TextTabbar.hpp"
 #include "wx/graphics.h"
 
 #include <wx/listimpl.cpp>
 #include <map>
+#include <memory>
 #include <wx/sizer.h>
+#include <wx/slider.h>
 #include "Gizmos/GLGizmoBase.hpp"
 #include "OpenGLManager.hpp"
 #ifdef __WINDOWS__
@@ -31,6 +35,7 @@
 #include "dark_mode.hpp"
 #endif // _MSW_DARK_MODE
 #endif //__WINDOWS__
+#include "libslic3r/Log.hpp"
 
 namespace Slic3r { namespace GUI {
 
@@ -64,6 +69,12 @@ static ::Label *make_row_title(wxWindow *parent, const wxString &text, int wrap_
     if (!tooltip.empty()) title->SetToolTip(tooltip);
     title->Wrap(wrap_width);
     return title;
+}
+
+static wxString minor_restricted_tip()
+{
+    return _L("For users under the age of majority, some services will be restricted. "
+              "This is managed by your parent or guardian in Family Hub.");
 }
 
 // One option row wrapped in a real window so it can paint a hover background.
@@ -238,6 +249,7 @@ wxBoxSizer *PreferencesDialog::create_item_combobox(wxString                    
                                                     std::string                     param,
                                                     const std::vector<wxString>    &label_list,
                                                     const std::vector<std::string> &value_list,
+                                                    const std::vector<wxString>    &tooltip_list,
                                                     std::function<void(int)>        callback)
 {
     assert(label_list.size() == value_list.size());
@@ -252,6 +264,7 @@ wxBoxSizer *PreferencesDialog::create_item_combobox(wxString                    
             return std::distance(values.begin(), it);
 
         } catch (...) {
+            BOOST_LOG_TRIVIAL(warning) << current_exception_message();
             return 0;
         }
     };
@@ -274,9 +287,14 @@ wxBoxSizer *PreferencesDialog::create_item_combobox(wxString                    
     combobox->SetFont(::Label::Body_13);
     combobox->GetDropDown().SetFont(::Label::Body_13);
 
-    std::vector<wxString>::iterator iter;
-    for (auto label : label_list)
-        combobox->Append(label);
+    for (auto label : label_list) combobox->Append(label);
+
+    assert(tooltip_list.empty() || tooltip_list.size() == label_list.size());
+    for (int i = 0; i < static_cast<int>(tooltip_list.size()); ++i) { combobox->SetItemTooltip(i, tooltip_list[i]); }
+
+    // Let the dropdown grow to fit the widest item (never narrower than the combobox),
+    // clamped at a fixed max width so long labels aren't ellipsized.
+    combobox->GetDropDown().SetUseContentWidth(true, true);
 
     auto old_value = app_config->get(param);
     if (!old_value.empty()) {
@@ -380,6 +398,21 @@ wxBoxSizer *PreferencesDialog::create_item_language_combobox(
         else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_POLISH)) {
             language_name = wxString::FromUTF8("Polski");
         }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_THAI)) {
+            language_name = wxString::FromUTF8("\xE0\xB9\x84\xE0\xB8\x97\xE0\xB8\xA2"); // ไทย
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_ROMANIAN)) {
+            language_name = wxString::FromUTF8("Rom\xC3\xA2n\xC4\x83"); // Română
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_GREEK)) {
+            language_name = wxString::FromUTF8("\xCE\x95\xCE\xBB\xCE\xBB\xCE\xB7\xCE\xBD\xCE\xB9\xCE\xBA\xCE\xAC"); // Ελληνικά
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_INDONESIAN)) {
+            language_name = wxString::FromUTF8("Bahasa Indonesia");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_VIETNAMESE)) {
+            language_name = wxString::FromUTF8("Ti\xE1\xBA\xBFng Vi\xE1\xBB\x87t"); // Tiếng Việt
+        }
 
         if (language == vlist[i]->CanonicalName) {
             m_current_language_selected = i;
@@ -442,15 +475,20 @@ wxBoxSizer *PreferencesDialog::create_item_language_combobox(
 
             m_current_language_selected = combobox->GetSelection();
             if (m_current_language_selected >= 0 && m_current_language_selected < vlist.size()) {
-                app_config->set(param, vlist[m_current_language_selected]->CanonicalName.ToUTF8().data());
-                app_config->save();
-
-                wxGetApp().load_language(vlist[m_current_language_selected]->CanonicalName, false);
-                Close();
-                // Reparent(nullptr);
-                GetParent()->RemoveChild(this);
-                Label::initSysFont(app_config->get_language_code());
-                wxGetApp().recreate_GUI(_L("Changing application language"));
+                auto old_value = app_config->get(param);
+                if (wxGetApp().load_language(vlist[m_current_language_selected]->CanonicalName, false)) {
+                    app_config->set(param, vlist[m_current_language_selected]->CanonicalName.ToUTF8().data());
+                    app_config->save();
+                    Close();
+                    // Reparent(nullptr);
+                    GetParent()->RemoveChild(this);
+                    Label::initSysFont(app_config->get_language_code(), false);
+                    wxGetApp().recreate_GUI(_L("Changing application language"));
+                } else {
+                    app_config->set(param, old_value);
+                    app_config->save();
+                    Close();
+                }
             }
         }
 
@@ -495,6 +533,11 @@ wxBoxSizer *PreferencesDialog::create_item_region_combobox(wxString title, wxWin
 
     combobox->GetDropDown().Bind(wxEVT_COMBOBOX, [this, combobox, current_region, local_regions](wxCommandEvent &e) {
         auto region_index = e.GetSelection();
+        if (region_index == current_region) {
+            // Re-selecting the region already in use: no change, do not prompt/log out.
+            e.Skip();
+            return;
+        }
         auto region       = local_regions[region_index];
 
         combobox->SetSelection(region_index);
@@ -626,7 +669,7 @@ wxBoxSizer *PreferencesDialog::create_item_input(wxString title, wxString title2
     sizer_input->SetMinSize(wxSize(-1, FromDIP(ITEM_MIN_HEIGHT)));
     auto input_title = make_row_title(parent, title, FromDIP(TITLE_WIDTH), tooltip);
 
-    auto       input = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(INPUT_WIDTH), -1), wxTE_PROCESS_ENTER);
+    auto       input = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(INPUT_WIDTH), FromDIP(ITEM_MIN_HEIGHT)), wxTE_PROCESS_ENTER);
     StateColor input_bg(std::pair<wxColour, int>(ThemeColor::Grey250, StateColor::Disabled), std::pair<wxColour, int>(ThemeColor::White, StateColor::Enabled));
     input->SetBackgroundColor(input_bg);
     input->GetTextCtrl()->SetValue(app_config->get(param));
@@ -660,6 +703,75 @@ wxBoxSizer *PreferencesDialog::create_item_input(wxString title, wxString title2
     return sizer_input;
 }
 
+wxBoxSizer *PreferencesDialog::create_item_int_slider(
+    wxString title, wxWindow *parent, wxString tooltip, std::string param, int range_min, int range_max, int default_value)
+{
+    wxBoxSizer *sizer_input = new wxBoxSizer(wxHORIZONTAL);
+    sizer_input->SetMinSize(wxSize(-1, FromDIP(ITEM_MIN_HEIGHT)));
+    auto input_title = make_row_title(parent, title, FromDIP(TITLE_WIDTH), tooltip);
+
+    int value = default_value;
+    const std::string stored = app_config->get(param);
+    long parsed = 0;
+    if (!stored.empty() && wxString::FromUTF8(stored).ToLong(&parsed))
+        value = static_cast<int>(parsed);
+    value = std::clamp(value, range_min, range_max);
+    if (stored != std::to_string(value)) {
+        app_config->set(param, std::to_string(value));
+        app_config->save();
+    }
+
+    // 80 + 8 + 56 matches COMBOBOX_WIDTH so the row lines up with other controls.
+    auto *slider = new wxSlider(parent, wxID_ANY, value, range_min, range_max, wxDefaultPosition,
+                                wxSize(FromDIP(80), FromDIP(ITEM_MIN_HEIGHT)));
+    auto *input = new ::TextInput(parent, wxString::Format("%d", value), wxEmptyString, wxEmptyString, wxDefaultPosition,
+                                  wxSize(FromDIP(56), FromDIP(ITEM_MIN_HEIGHT)), wxTE_PROCESS_ENTER);
+    StateColor input_bg(std::pair<wxColour, int>(ThemeColor::Grey250, StateColor::Disabled), std::pair<wxColour, int>(ThemeColor::White, StateColor::Enabled));
+    input->SetBackgroundColor(input_bg);
+    wxTextValidator validator(wxFILTER_DIGITS);
+    input->GetTextCtrl()->SetValidator(validator);
+
+    sizer_input->AddSpacer(FromDIP(ITEM_LEFT_PADDING));
+    sizer_input->Add(input_title, wxSizerFlags().CenterVertical().Proportion(1).Border(wxRIGHT, FromDIP(TITLE_CONTROL_GAP)));
+    sizer_input->Add(slider, wxSizerFlags().CenterVertical());
+    sizer_input->AddSpacer(FromDIP(8));
+    sizer_input->Add(input, wxSizerFlags().CenterVertical().Border(wxRIGHT, FromDIP(ITEM_RIGHT_PADDING)));
+
+    auto updating = std::make_shared<bool>(false);
+    auto commit = [this, param, slider, input, range_min, range_max, updating](int next) {
+        if (*updating)
+            return;
+        next = std::clamp(next, range_min, range_max);
+        *updating = true;
+        if (slider->GetValue() != next)
+            slider->SetValue(next);
+        input->GetTextCtrl()->ChangeValue(wxString::Format("%d", next));
+        *updating = false;
+        app_config->set(param, std::to_string(next));
+        app_config->save();
+    };
+
+    slider->Bind(wxEVT_SLIDER, [commit, slider](wxCommandEvent &) { commit(slider->GetValue()); });
+    input->GetTextCtrl()->Bind(wxEVT_TEXT_ENTER, [commit, input, slider](wxCommandEvent &e) {
+        long entered = 0;
+        if (!input->GetTextCtrl()->GetValue().ToLong(&entered))
+            commit(slider->GetValue());
+        else
+            commit(static_cast<int>(entered));
+        e.Skip();
+    });
+    input->GetTextCtrl()->Bind(wxEVT_KILL_FOCUS, [commit, input, slider](wxFocusEvent &e) {
+        long entered = 0;
+        if (!input->GetTextCtrl()->GetValue().ToLong(&entered))
+            commit(slider->GetValue());
+        else
+            commit(static_cast<int>(entered));
+        e.Skip();
+    });
+
+    return sizer_input;
+}
+
 wxBoxSizer *PreferencesDialog::create_item_range_input(
     wxString title, wxWindow *parent, wxString tooltip, std::string param, float range_min, float range_max, int keep_digital, std::function<void(wxString)> onchange)
 {
@@ -673,7 +785,7 @@ wxBoxSizer *PreferencesDialog::create_item_range_input(
         app_config->set(param, std::to_string(range_min));
         app_config->save();
     }
-    auto       input = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(INPUT_WIDTH), -1), wxTE_PROCESS_ENTER);
+    auto       input = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(INPUT_WIDTH), FromDIP(ITEM_MIN_HEIGHT)), wxTE_PROCESS_ENTER);
     StateColor input_bg(std::pair<wxColour, int>(ThemeColor::Grey250, StateColor::Disabled), std::pair<wxColour, int>(ThemeColor::White, StateColor::Enabled));
     input->SetBackgroundColor(input_bg);
     input->GetTextCtrl()->SetValue(app_config->get(param));
@@ -741,14 +853,14 @@ wxBoxSizer *PreferencesDialog::create_item_range_two_input(wxString             
         app_config->set(param1, std::to_string(range_min));
         app_config->save();
     }
-    auto       input = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(DUAL_INPUT_WIDTH), -1), wxTE_PROCESS_ENTER);
+    auto       input = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(DUAL_INPUT_WIDTH), FromDIP(ITEM_MIN_HEIGHT)), wxTE_PROCESS_ENTER);
     StateColor input_bg(std::pair<wxColour, int>(ThemeColor::Grey250, StateColor::Disabled), std::pair<wxColour, int>(ThemeColor::White, StateColor::Enabled));
     input->SetBackgroundColor(input_bg);
     input->GetTextCtrl()->SetValue(app_config->get(param));
     wxTextValidator validator(wxFILTER_NUMERIC);
     input->GetTextCtrl()->SetValidator(validator);
 
-    auto input1 = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(DUAL_INPUT_WIDTH), -1), wxTE_PROCESS_ENTER);
+    auto input1 = new ::TextInput(parent, wxEmptyString, wxEmptyString, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(DUAL_INPUT_WIDTH), FromDIP(ITEM_MIN_HEIGHT)), wxTE_PROCESS_ENTER);
     input1->SetBackgroundColor(input_bg);
     input1->GetTextCtrl()->SetValue(app_config->get(param1));
     input1->GetTextCtrl()->SetValidator(validator);
@@ -944,7 +1056,7 @@ wxBoxSizer *PreferencesDialog::create_item_checkbox(wxString title, wxWindow *pa
             } else {
                 wxGetApp().stop_sync_user_preset();
             }
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " sync_user_preset: " << (sync ? "true" : "false");
+            BOOST_LOG_TRIVIAL(info) << "sync_user_preset: " << (sync ? "true" : "false");
         }
 
         #ifdef __WXMSW__
@@ -1034,51 +1146,21 @@ wxBoxSizer *PreferencesDialog::create_item_checkbox(wxString title, wxWindow *pa
             wxPostEvent(wxGetApp().plater(), evt);
         }
 
-        if (param == "enable_high_low_temp_mixed_printing") {
-            if (checkbox->GetValue()) {
-                const wxString warning_title = _L("Bed Temperature Difference Warning");
-                const wxString warning_message =
-                    _L("Using filaments with significantly different temperatures may cause:\n"
-                        "• Extruder clogging\n"
-                        "• Nozzle damage\n"
-                        "• Layer adhesion issues\n\n"
-                        "Continue with enabling this feature?");
-                std::function<void(const wxString&)> link_callback = [](const wxString&) {
-                            const std::string lang_code = wxGetApp().app_config->get("language");
-                            const wxString region = (lang_code.find("zh") != std::string::npos) ? L"zh" : L"en";
-                            const wxString wiki_url = wxString::Format(
-                                L"https://wiki.bambulab.com/%s/filament-acc/filament/h2d-filament-config-limit",
-                                region
-                            );
-                            wxGetApp().open_browser_with_warning_dialog(wiki_url);
-                            };
-
-                MessageDialog msg_dialog(
-                    nullptr,
-                    warning_message,
-                    warning_title,
-                    wxICON_WARNING | wxYES_NO | wxCANCEL | wxYES_DEFAULT | wxCENTRE,
-                    wxEmptyString,
-                    _L("Click Wiki for help."),
-                    link_callback
-                );
-
-                if (msg_dialog.ShowModal() != wxID_YES) {
-                    checkbox->SetValue(false);
-                    app_config->set_bool(param, false);
-                    app_config->save();
-                }
-            }
-        }
         e.Skip();
     });
 
     //// for debug mode
     if (param == "developer_mode") { m_developer_mode_ckeckbox = checkbox; }
     if (param == "internal_developer_mode") { m_internal_developer_mode_ckeckbox = checkbox; }
+    if (param == "privacyuse") { m_privacy_checkbox = checkbox; }
 
 
     checkbox->SetToolTip(tooltip);
+    if (param == "privacyuse" && wxGetApp().is_uep_force_disabled()) {
+        checkbox->SetValue(wxGetApp().is_uep_force_checked());
+        checkbox->Enable(false);
+        checkbox_title->SetToolTip(minor_restricted_tip());
+    }
     return m_sizer_checkbox;
 }
 
@@ -1187,7 +1269,9 @@ PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxSt
                 j["auto_flushing"] = value;
                 agent->track_event("preferences_changed", j.dump());
             }
-        } catch(...) {}
+        } catch(...) {
+            BOOST_LOG_TRIVIAL(warning) << current_exception_message();
+        }
 
         // Check if time format changed
         std::string current_use_12h_time_format = wxGetApp().app_config->get("use_12h_time_format");
@@ -1195,102 +1279,12 @@ PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxSt
 
         event.Skip();
         });
+
+    // Register so an async UEP decision update can refresh the checkbox live, and
+    // re-fetch the UEP decision on open to keep telemetry enable/disable in sync.
+    wxGetApp().set_preferences_dialog(this);
+    wxGetApp().fetch_uep_decision();
 }
-
-//  PreferenceTabbar — plain-text top tabs matching the Preferences Figma:
-//  a horizontal row of labels (active = bold dark, inactive = regular grey) with
-//  a green underline under the selected tab, over a 1px divider line. Emits the
-//  standard wxEVT_CHOICE (int = selected index) when the user clicks a tab.
-class PreferenceTabbar : public wxControl
-{
-public:
-    PreferenceTabbar(wxWindow *parent);
-    void AddTab(const wxString &label);
-    void SetSelection(int sel);
-    int  GetSelection() const { return m_selection; }
-    void Rescale();
-
-private:
-    void                        render();
-    std::vector<wxStaticText *> m_labels;
-    std::vector<wxWindow *>     m_underlines; // green indicator under each tab
-    wxBoxSizer                 *m_row       = nullptr;
-    int                         m_selection = -1;
-};
-
-PreferenceTabbar::PreferenceTabbar(wxWindow *parent) : wxControl(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE)
-{
-    SetBackgroundColour(*wxWHITE);
-    auto *outer = new wxBoxSizer(wxVERTICAL);
-    m_row       = new wxBoxSizer(wxHORIZONTAL);
-    outer->Add(m_row, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT, FromDIP(48)));
-    auto *line = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 1));
-    line->SetBackgroundColour(ThemeColor::Grey300);
-    outer->Add(line, wxSizerFlags().Expand());
-
-    SetSizer(outer);
-}
-
-void PreferenceTabbar::AddTab(const wxString &label)
-{
-    const int index = (int) m_labels.size();
-
-    // Each tab is a column: the label on top and a 2px underline below it that
-    // turns ThemeColor::BrandGreen when the tab is selected.
-    auto *col  = new wxBoxSizer(wxVERTICAL);
-    auto *text = new wxStaticText(this, wxID_ANY, label);
-    text->SetFont(::Label::Body_14);
-
-    auto *underline = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(-1, FromDIP(2)));
-    underline->SetBackgroundColour(this->GetBackgroundColour());
-
-    auto on_click = [this, index](wxMouseEvent &) {
-        SetSelection(index);
-        wxCommandEvent evt(wxEVT_CHOICE, GetId());
-        evt.SetEventObject(this);
-        evt.SetInt(index);
-        wxPostEvent(this, evt);
-    };
-    text->Bind(wxEVT_LEFT_DOWN, on_click);
-    underline->Bind(wxEVT_LEFT_DOWN, on_click);
-    text->Bind(wxEVT_ENTER_WINDOW, [text](wxMouseEvent &e) {
-        text->SetCursor(wxCURSOR_HAND);
-        e.Skip();
-    });
-
-    col->AddStretchSpacer();
-    col->Add(text);
-    col->AddStretchSpacer();
-    col->Add(underline, 0, wxEXPAND);
-
-    m_labels.push_back(text);
-    m_underlines.push_back(underline);
-    if (m_row->GetItemCount() != 0) m_row->AddStretchSpacer();
-    m_row->Add(col, wxSizerFlags().CenterHorizontal());
-    if (m_selection < 0) SetSelection(0);
-}
-
-void PreferenceTabbar::SetSelection(int sel)
-{
-    if (sel < 0 || sel >= (int) m_labels.size()) return;
-
-    m_selection = sel;
-    render();
-}
-
-void PreferenceTabbar::render()
-{
-    for (int i = 0; i < (int) m_labels.size(); ++i) {
-        const bool active = (i == m_selection);
-        m_labels[i]->SetFont(active ? Label::Head_14 : Label::Body_14);
-        m_underlines[i]->SetBackgroundColour(active ? ThemeColor::BrandGreen : GetBackgroundColour());
-        m_underlines[i]->Refresh();
-    }
-    Layout();
-    Refresh();
-}
-
-void PreferenceTabbar::Rescale() { render(); }
 
 void PreferencesDialog::create()
 {
@@ -1310,7 +1304,7 @@ void PreferencesDialog::create()
 
     auto main_sizer = new wxBoxSizer(wxVERTICAL);
 
-    m_tabbar = new PreferenceTabbar(this);
+    m_tabbar = new TextTabbar(this);
     m_book   = new wxSimplebook(this, wxID_ANY);
 
     auto add_tab = [this](const wxString &label, wxWindow *page) {
@@ -1362,8 +1356,21 @@ void PreferencesDialog::create()
 
 PreferencesDialog::~PreferencesDialog()
 {
+    wxGetApp().set_preferences_dialog(nullptr);
     m_radio_group.DeleteContents(true);
     m_hash_selector.clear();
+}
+
+void PreferencesDialog::refresh_privacy_checkbox()
+{
+    if (!m_privacy_checkbox) return;
+    if (wxGetApp().is_uep_force_disabled()) {
+        m_privacy_checkbox->SetValue(wxGetApp().is_uep_force_checked());
+        m_privacy_checkbox->Enable(false);
+    } else {
+        m_privacy_checkbox->Enable(true);
+        m_privacy_checkbox->SetValue(app_config->get("firstguide", "privacyuse") == "true");
+    }
 }
 
 void PreferencesDialog::on_dpi_changed(const wxRect &suggested_rect) {
@@ -1394,7 +1401,7 @@ void PreferencesDialog::on_dpi_changed(const wxRect &suggested_rect) {
             // Keep the fixed Figma-matched size (capped to the screen) on a
             // DPI/monitor switch instead of stretching to a fraction of the screen.
             this->SetSize(FromDIP(640), std::min(FromDIP(640), int(m_screen_height * 0.7)));
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " The display screen has switched";
+            BOOST_LOG_TRIVIAL(info) << "The display screen has switched";
         }
     }
 }
@@ -1456,9 +1463,12 @@ wxWindow *PreferencesDialog::create_general_tab()
     auto item_darkmode = create_item_darkmode_checkbox(_L("Enable dark mode"), scrolled, _L("Enable dark mode"), 50, "dark_color_mode");
 #endif
 
-    std::vector<wxString>    FlushOptionLabels = {_L("All"), _L("Color change"), _L("Disabled")};
-    std::vector<std::string> FlushOptionValues = {"all", "color change", "disabled"};
-    auto item_auto_flush = create_item_combobox(_L("Auto Flush"), scrolled, _L("Auto calculate flush volumes"), "auto_calculate_flush", FlushOptionLabels, FlushOptionValues);
+    std::vector<wxString>    FlushOptionLabels{_L("All related changes"), _L("When color changes"), _L("Turn off auto calculate")};
+    std::vector<std::string> FlushOptionValues{"all", "color change", "disabled"};
+    std::vector<wxString>    FlushOptionTooltips{_L("Auto calculate when color changes, type or configuration changes"), _L("Auto calculate when sync or modify filament colors"),
+                                                 _L("Keep current flush volumes, trigger manually when needed")};
+    auto item_auto_flush = create_item_combobox(_L("Auto Calculate Flush Volume"), scrolled, _L("Auto calculate flush volumes"), "auto_calculate_flush", FlushOptionLabels,
+                                                FlushOptionValues, FlushOptionTooltips);
 
     auto item_single_instance = create_item_checkbox(_L("Keep only one Bambu Studio instance"), scrolled,
 #if __APPLE__
@@ -1517,7 +1527,10 @@ wxWindow *PreferencesDialog::create_general_tab()
     sizer->Add(wrap_option_row(scrolled, item_fila_manager), flags);
     sizer->Add(wrap_option_row(scrolled, item_multi_machine), flags);
     sizer->Add(wrap_option_row(scrolled, item_beta_version_update), flags);
-    sizer->Add(wrap_option_row(scrolled, item_priv_policy), flags);
+    auto *priv_row = wrap_option_row(scrolled, item_priv_policy);
+    if (wxGetApp().is_uep_force_disabled())
+        priv_row->SetToolTip(minor_restricted_tip());
+    sizer->Add(priv_row, flags);
     sizer->Add(wrap_option_row(scrolled, item_downloads), flags);
     scrolled->SetSizer(sizer);
     scrolled->FitInside();
@@ -1549,9 +1562,9 @@ wxWindow *PreferencesDialog::create_user_tab()
     auto item_auto_transfer = create_item_checkbox(_L("Automatically transfer modified value when switching process and filament presets"), scrolled,
                                                    _L("After closing, a popup will appear to ask each time"), 50, "auto_transfer_when_switch_preset");
 
-    auto item_mix_print_high_low_temp = create_item_checkbox(_L("Remove the restriction on mixed printing of high and low temperature filaments."), scrolled,
-                                                             _L("With this option enabled, you can print materials with a large temperature difference together."), 50,
-                                                             "enable_high_low_temp_mixed_printing");
+    auto item_auto_arrange_wipe_tower_on_switch_printer = create_item_checkbox(_L("Automatically optimize wipe tower placement"), scrolled,
+                                                             _L("With this option enabled, the wipe tower will be placed at its optimal position."), 50,
+                                                             "auto_optimize_wipe_tower_placement");
 
     auto item_user_sync = create_item_checkbox(_L("Auto sync user presets(Printer/Filament/Process)"), scrolled,
                                                _L("If enabled, auto sync user presets with cloud after Bambu Studio startup or presets modified."), 50, "sync_user_preset");
@@ -1571,7 +1584,7 @@ wxWindow *PreferencesDialog::create_user_tab()
     sizer->Add(wrap_option_row(scrolled, item_bed_type_follow_preset), flags);
     sizer->Add(wrap_option_row(scrolled, item_auto_stop_liveview), flags);
     sizer->Add(wrap_option_row(scrolled, item_auto_transfer), flags);
-    sizer->Add(wrap_option_row(scrolled, item_mix_print_high_low_temp), flags);
+    sizer->Add(wrap_option_row(scrolled, item_auto_arrange_wipe_tower_on_switch_printer), flags);
     sizer->Add(wrap_option_row(scrolled, item_user_sync), flags);
     sizer->Add(wrap_option_row(scrolled, item_system_sync), flags);
 #ifdef _WIN32
@@ -1588,20 +1601,27 @@ wxWindow *PreferencesDialog::create_3d_tab()
     auto        scrolled = new ScrollPanel(m_book);
     wxBoxSizer *sizer    = new wxBoxSizer(wxVERTICAL);
 
-    auto title_3d = create_item_title(_L("3D Settings"), scrolled, _L("3D Settings"));
+    auto title_3d     = create_item_title(_L("3D Settings"), scrolled, _L("3D Settings"));
+    auto title_mouse  = create_item_title(_L("Mouse Settings"), scrolled, _L("Mouse Settings"));
+    auto title_import = create_item_title(_L("Import Settings"), scrolled, _L("Import Settings"));
 
     auto item_zoom_to_mouse = create_item_checkbox(_L("Zoom to mouse position"), scrolled,
                                                    _L("Zoom in towards the mouse pointer's position in the 3D view, rather than the 2D window center."), 50, "zoom_to_mouse");
+    auto item_reverse_mouse_wheel_zoom = create_item_checkbox(_L("Reverse direction of zoom with mouse wheel"), scrolled,
+                                                              _L("If enabled, reverses the direction of zoom with mouse wheel."), 50, "reverse_mouse_wheel_zoom");
+    auto item_drag_to_move = create_item_checkbox(_L("Drag with left mouse button to move"), scrolled,
+                                                   _L("If enabled, the left mouse button can move models by dragging; if disabled, the left button only selects or clicks."), 50,
+                                                   "canvas_drag_to_move");
 
     std::vector<wxString> assemble_view_preview_options = {_L("Auto"), _L("Open"), _L("Close")};
     auto                  enable_assemble_view_preview  = create_item_combobox(_L("Display overview"), scrolled, _L("Display overview"), "enable_assemble_view_preview",
-                                                                               assemble_view_preview_options, {"Auto", "Open", "Close"}, [](int idx) {
+                                                                               assemble_view_preview_options, {"Auto", "Open", "Close"}, {}, [](int idx) {
                                                                  wxGetApp().app_config->set("enable_assemble_view_preview", idx == 0 ? "Auto" : idx == 1 ? "Open" : "Close");
                                                                  if (wxGetApp().app_config->get("enable_assemble_view_preview") == "Auto")
                                                                      wxGetApp().app_config->set_bool("enable_bvh", true);
                                                                  else if (wxGetApp().app_config->get("enable_assemble_view_preview") == "Open")
                                                                      wxGetApp().app_config->set_bool("enable_bvh", false);
-                                                             });
+                                                                               });
 
     float range_min = 1.0f, range_max = 2.5f;
     auto  item_grabber_size = create_item_range_input(_L("Grabber scale"), scrolled,
@@ -1620,7 +1640,7 @@ wxWindow *PreferencesDialog::create_3d_tab()
                                                            "3d_middle_tooltip_offset_x", "3d_middle_tooltip_offset_y", range_min, range_max, 1, nullptr, nullptr);
 
     std::vector<wxString> toolbar_style = {_L("Collapsible"), _L("Uncollapsible")};
-    auto item_toolbar_style = create_item_combobox(_L("Toolbar Style"), scrolled, _L("Toolbar Style"), "toolbar_style", toolbar_style, {"0", "1"}, [](int idx) -> void {
+    auto item_toolbar_style = create_item_combobox(_L("Toolbar Style"), scrolled, _L("Toolbar Style"), "toolbar_style", toolbar_style, {"0", "1"}, {}, [](int idx) -> void {
         const auto &p_ogl_manager = wxGetApp().get_opengl_manager();
         p_ogl_manager->set_toolbar_rendering_style(idx);
     });
@@ -1656,11 +1676,11 @@ wxWindow *PreferencesDialog::create_3d_tab()
     sizer->AddSpacer(FromDIP(8));
     auto flags = row_flags();
 
+    // ---- 3D Settings ----
     sizer->Add(wrap_option_row(scrolled, enable_assemble_view_preview), flags);
     sizer->Add(wrap_option_row(scrolled, item_grabber_size), flags);
     sizer->Add(wrap_option_row(scrolled, item_tooltip_offset), flags);
     sizer->Add(wrap_option_row(scrolled, item_toolbar_style), flags);
-    sizer->Add(wrap_option_row(scrolled, item_zoom_to_mouse), flags);
     sizer->Add(wrap_option_row(scrolled, item_show_shells), flags);
     sizer->Add(wrap_option_row(scrolled, item_show_heat_soak_area), flags);
 #if !BBL_RELEASE_TO_PUBLIC
@@ -1668,9 +1688,6 @@ wxWindow *PreferencesDialog::create_3d_tab()
                                                      "show_assembly_bvh_bounds");
     sizer->Add(wrap_option_row(scrolled, item_show_bvh_bounds), flags);
 #endif
-    sizer->Add(wrap_option_row(scrolled, item_step_mesh_setting), flags);
-    sizer->Add(wrap_option_row(scrolled, item_import_svg), flags);
-    sizer->Add(wrap_option_row(scrolled, item_gamma_obj), flags);
     sizer->Add(wrap_option_row(scrolled, item_enable_record_gcodeviewer), flags);
     sizer->Add(wrap_option_row(scrolled, item_enable_lod), flags);
     sizer->Add(wrap_option_row(scrolled, item_advanced_gcode), flags);
@@ -1681,6 +1698,20 @@ wxWindow *PreferencesDialog::create_3d_tab()
                                                        _L("When enabled, the camera full screen view opens only on the monitor that contains Bambu Studio."), 50,
                                                        "camera_fullscreen_active_monitor_only");
     sizer->Add(wrap_option_row(scrolled, item_camera_fullscreen), flags); // [refactor-review]
+
+    // ---- Mouse Settings ----
+    sizer->Add(title_mouse, wxSizerFlags().Expand().Border(wxTOP, FromDIP(24)));
+    sizer->AddSpacer(FromDIP(8));
+    sizer->Add(wrap_option_row(scrolled, item_zoom_to_mouse), flags);
+    sizer->Add(wrap_option_row(scrolled, item_reverse_mouse_wheel_zoom), flags);
+    sizer->Add(wrap_option_row(scrolled, item_drag_to_move), flags);
+
+    // ---- Import Settings ----
+    sizer->Add(title_import, wxSizerFlags().Expand().Border(wxTOP, FromDIP(24)));
+    sizer->AddSpacer(FromDIP(8));
+    sizer->Add(wrap_option_row(scrolled, item_step_mesh_setting), flags);
+    sizer->Add(wrap_option_row(scrolled, item_import_svg), flags);
+    sizer->Add(wrap_option_row(scrolled, item_gamma_obj), flags);
 
     sizer->AddSpacer(FromDIP(20));
     scrolled->SetSizer(sizer);
@@ -1701,10 +1732,13 @@ wxWindow *PreferencesDialog::create_other_tab()
     });
     auto item_gcodes_warning = create_item_checkbox(_L("No warnings when loading 3MF with modified G-codes"), scrolled, _L("No warnings when loading 3MF with modified G-codes"),
                                                     50, "no_warn_when_modified_gcodes");
+    auto item_skip_printer_check = create_item_checkbox(_L("Don't check printer information when loading 3MF"), scrolled,
+                                                        _L("No prompt to migrate the preset when the loaded 3MF does not match the connected printer"), 50,
+                                                        "skip_printer_check_on_3mf_load");
     std::vector<wxString>    backup_labels = {_L("10 seconds"), _L("20 seconds"), _L("30 seconds"), _L("1 minute"), _L("2 minutes"),
                                               _L("5 minutes"),  _L("10 minutes"), _L("30 minutes"), _L("never")};
     std::vector<std::string> backup_values = {"10", "20", "30", "60", "120", "300", "600", "1800", "0"};
-    auto item_auto_backup = create_item_combobox(_L("Auto-Backup"), scrolled, _L("The peroid of backup in seconds."), "backup_interval", backup_labels, backup_values,
+    auto item_auto_backup = create_item_combobox(_L("Auto-Backup"), scrolled, _L("The peroid of backup in seconds."), "backup_interval", backup_labels, backup_values, {},
                                                  [this](int) {
                                                      m_backup_interval_time = app_config->get("backup_interval");
                                                      long backup_interval   = 0;
@@ -1719,6 +1753,7 @@ wxWindow *PreferencesDialog::create_other_tab()
     sizer->Add(wrap_option_row(scrolled, item_max_recent_count), flags);
     sizer->Add(wrap_option_row(scrolled, item_auto_backup), flags);
     sizer->Add(wrap_option_row(scrolled, item_gcodes_warning), flags);
+    sizer->Add(wrap_option_row(scrolled, item_skip_printer_check), flags);
 
     // ---- Online Models (visible only when has_model_mall()) ----
     auto title_modelmall   = create_item_title(_L("Online Models"), scrolled, _L("Online Models"));
@@ -1797,6 +1832,12 @@ wxWindow *PreferencesDialog::create_developer_tab()
     auto item_internal_dev = create_item_checkbox(_L("Internal developer mode"), scrolled, _L("Internal developer mode"), 50, "internal_developer_mode");
     auto item_ssl_mqtt     = create_item_checkbox(_L("Enable SSL(MQTT)"), scrolled, _L("Enable SSL(MQTT)"), 50, "enable_ssl_for_mqtt");
     auto item_ssl_ftp      = create_item_checkbox(_L("Enable SSL(FTP)"), scrolled, _L("Enable SSL(FTP)"), 50, "enable_ssl_for_ftp");
+
+    auto title_texture = create_item_title(_L("Import Texture Model"), scrolled, _L("Import Texture Model"));
+    auto item_color_tolerance = create_item_int_slider(
+        _L("Color Tolerance of Filament Matching"), scrolled,
+        _L("CIEDE2000 difference used when matching imported texture colors to filaments. Filaments within this band are treated as equally close. This does not merge colors and does not change the match threshold in the texture import dialog."),
+        "texture_import_color_tolerance", 1, 100, 5);
 
     auto title_host = create_item_title(_L("Host Setting"), scrolled, _L("Host Setting"));
     auto radio1     = create_item_radiobox(_L("DEV host: api-dev.bambu-lab.com/v1"), scrolled, wxEmptyString, 50, 1, "dev_host");
@@ -1909,6 +1950,10 @@ wxWindow *PreferencesDialog::create_developer_tab()
     sizer->Add(item_ssl_mqtt, flags);
     sizer->Add(item_ssl_ftp, flags);
 
+    sizer->Add(title_texture, wxSizerFlags().Expand().Border(wxTOP, FromDIP(24)));
+    sizer->AddSpacer(FromDIP(8));
+    sizer->Add(item_color_tolerance, flags);
+
     sizer->Add(title_host, wxSizerFlags().Expand().Border(wxTOP, FromDIP(24)));
     sizer->Add(radio1, flags);
     sizer->Add(radio2, flags);
@@ -1993,7 +2038,7 @@ ResetWarningsDialog::ResetWarningsDialog(wxWindow *parent) : DPIDialog(parent, w
                                           "- Executing post-processing scripts\n"
                                           "- Support structure recommendation prompt\n"
                                           "- Unsaved projects.\n"
-                                          "- Mixed color sublayer with variable layer height warning"));
+                                          "- Delete a filament used by a model"));
     det_text->SetForegroundColour(ThemeColor::TextSecondary);
     det_text->SetFont(::Label::Body_13);
     det_sizer->Add(det_text, 0, wxALL, FromDIP(12));
@@ -2019,7 +2064,7 @@ ResetWarningsDialog::ResetWarningsDialog(wxWindow *parent) : DPIDialog(parent, w
     auto      *confirm_btn = new Button(this, _L("Confirm"));
     confirm_btn->SetBackgroundColor(btn_bg_green);
     confirm_btn->SetBorderColor(ThemeColor::BrandGreen);
-    confirm_btn->SetTextColor(*wxWHITE);
+    confirm_btn->SetTextColor(ThemeColor::WhiteFixed);
     confirm_btn->SetFont(::Label::Body_12);
     confirm_btn->SetMinSize(wxSize(FromDIP(58), FromDIP(24)));
     confirm_btn->SetCornerRadius(FromDIP(6));
@@ -2054,9 +2099,12 @@ void PreferencesDialog::on_reset_all_warnings()
     // Keys that the various "Don't show again"-style dialogs persist their
     // dismissal choice under. Erasing them re-enables the corresponding dialog.
     app_config->erase("app", "sync_after_load_file_show_flag");
+    app_config->erase("app", "skip_printer_check_on_3mf_load");
     app_config->erase("app", "skip_non_bambu_3mf_warning");
     app_config->erase("app", "post_process_script_choice");
-    app_config->erase("app", "no_warn_mixed_sublayer_variable_layer");
+    app_config->erase("app", "no_warn_delete_used_filament");
+    app_config->erase("app", "no_show_tpu_tips");
+    app_config->erase("app", "skip_pre_print_warning_dialog");
     app_config->set("show_support_recommend_dialog", "true");
     app_config->set("save_project_choise", "");
     if (wxGetApp().plater()) wxGetApp().plater()->reset_post_process_script_choice();
@@ -2090,11 +2138,11 @@ void PreferencesDialog::on_reset_preferences()
         "use_12h_time_format",
         "auto_stop_liveview",
         "auto_transfer_when_switch_preset",
-        "enable_high_low_temp_mixed_printing",
         "sync_user_preset",
         "sync_system_preset",
-        "disable_fins_extrude_safe_temp",
         "zoom_to_mouse",
+        "reverse_mouse_wheel_zoom",
+        "canvas_drag_to_move",
         "enable_assemble_view_preview",
         "grabber_size_factor",
         "3d_middle_tooltip_offset_x",
@@ -2109,6 +2157,7 @@ void PreferencesDialog::on_reset_preferences()
         "camera_fullscreen_active_monitor_only",
         "max_recent_count",
         "no_warn_when_modified_gcodes",
+        "skip_printer_check_on_3mf_load",
         "backup_switch",
         "backup_interval",
         "staff_pick_switch",
@@ -2117,6 +2166,7 @@ void PreferencesDialog::on_reset_preferences()
         "skip_ams_blacklist_check",
         "enable_webview_devtools",
         "severity_level",
+        "texture_import_color_tolerance",
     };
     for (const char *k : kPrefKeys) app_config->erase("app", k);
     app_config->set_defaults();

@@ -44,6 +44,30 @@ def inspect(releases: list[dict], state: dict) -> dict:
     }
 
 
+def update_metadata(root: Path, tag: str, commit: str) -> None:
+    """Keep the manifest and compiled updater version in sync on an upstream bump."""
+    version_tuple(tag)  # Reject malformed tags before writing either file.
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("Expected the upstream commit SHA")
+    version = tag[1:]
+    state_path = root / "printfins-fork.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state.update(upstream_tag=tag, upstream_version=version, upstream_commit=commit,
+                 fork_revision=1, fork_version=f"{version}-ecore.1")
+    header_path = root / "src/slic3r/GUI/ForkVersion.hpp"
+    header = header_path.read_text(encoding="utf-8")
+    for pattern, replacement in (
+        (r'upstream_version = "[^"]+"', f'upstream_version = "{version}"'),
+        (r'revision = \d+', 'revision = 1'),
+        (r'display = "[^"]+"', f'display = "{version}-ecore.1"'),
+    ):
+        header, count = re.subn(pattern, replacement, header)
+        if count != 1:
+            raise ValueError(f"Expected exactly one compiled version field: {pattern}")
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    header_path.write_text(header, encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--releases-json", type=Path, required=True)

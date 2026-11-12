@@ -47,6 +47,38 @@ class ExtrusionLayers;
 #define TIME_MAKE_PERIMETERS "make_perimeters_time"
 #define TIME_INFILL "infill_time"
 #define TIME_GENERATE_SUPPORT "generate_support_material_time"
+#define TIME_SLICE_LAYERS "slice_layers_time"
+#define TIME_REGION_SPLIT "region_split_time"
+#define TIME_MM_SEGMENT_2D "multifilament_segment_2d_time"
+#define TIME_WALL "wall_time"
+#define TIME_PREPARE_INFILL "prepare_infill_time"
+#define TIME_INFILL_GENERATE "infill_generate_time"
+#define TIME_TOOLPATH "toolpath_time"
+#define TIME_EXPORT_GCODE "export_gcode_time"
+#define TIME_IRONING "ironing_time"
+#define TIME_DETECT_OVERHANGS "detect_overhangs_time"
+#define TIME_SKIRT_BRIM "skirt_brim_time"
+#define TIME_WIPE_TOWER "wipe_tower_time"
+#define TIME_FLUSH_PLAN "flush_plan_time"
+#define TIME_CONFLICT_CHECK "conflict_check_time"
+#define TIME_OTHER_SLICE "other_slice_time"
+#define TIME_SUPPORT_DETECT "support_detect_time"
+#define TIME_SUPPORT_TREE_GENERATE "support_tree_generate_time"
+#define TIME_SUPPORT_NORMAL_GENERATE "support_normal_generate_time"
+#define TIME_SUPPORT_INTERFACE "support_interface_time"
+#define TIME_SUPPORT_TOOLPATH "support_toolpath_time"
+
+struct SupportStageTimes
+{
+    long long detect {0};
+    long long tree_generate {0};
+    long long normal_generate {0};
+    long long interface_generate {0};
+    long long toolpath_generate {0};
+
+    void reset() { *this = {}; }
+    long long total() const { return detect + tree_generate + normal_generate + interface_generate + toolpath_generate; }
+};
 
 // BBS: move from PrintObjectSlice.cpp
 struct VolumeSlices
@@ -492,10 +524,14 @@ public:
     bool                        has_support()           const { return m_config.support_type.value != stPrintFins && (m_config.enable_support || m_config.enforce_support_layers > 0); }
     bool                        has_raft()              const { return m_config.raft_layers > 0; }
     bool                        has_support_material()  const { return this->has_support() || this->has_raft(); }
+    SupportStageTimes&          support_stage_times() { return m_support_stage_times; }
+    const SupportStageTimes&    support_stage_times() const { return m_support_stage_times; }
     // Checks if the model object is painted using the multi-material painting gizmo.
     bool                        is_mm_painted()         const { return this->model_object()->is_mm_painted(); }
     // Checks if the model object is painted using the fuzzy skin painting gizmo.
     bool                        is_fuzzy_skin_painted() const { return this->model_object()->is_fuzzy_skin_painted(); }
+    // Checks if any printing region of this object enables beam interlocking.
+    bool                        has_interlocking_beam() const;
 
     // returns 0-based indices of extruders used to print the object (without brim, support and other helper extrusions)
     std::vector<unsigned int>   object_extruders() const;
@@ -532,6 +568,10 @@ public:
 
     // BBS: returns 1-based indices of extruders used to print the first layer wall of objects
     std::vector<int>            object_first_layer_wall_extruders;
+    // BBS multi-diameter: 1-based wall filament whose extrusion reaches the bed first, and the print_z it is
+    // extruded at. A coarse nozzle prints its bed band only at the band top, so its brim belongs to that layer.
+    int                         object_brim_filament = 0;
+    double                      object_brim_print_z  = 0.;
     bool             has_variable_layer_heights = false;
 
     // OrcaSlicer
@@ -561,6 +601,9 @@ private:
         const ConfigOptionResolver &old_config, const ConfigOptionResolver &new_config, const std::vector<t_config_option_key> &opt_keys);
     // If ! m_slicing_params.valid, recalculate.
     void                    update_slicing_parameters();
+    // Slicing parameters of this object from its current config, for the given single-diameter layering nozzle
+    // (0 for the fine grid). update_slicing_parameters() stores them with Print::single_diameter_layering_nozzle().
+    SlicingParameters       compute_slicing_parameters(double single_diameter_layering_nozzle) const;
 
     static PrintObjectConfig object_config_from_model_object(const PrintObjectConfig &default_object_config, const ModelObject &object, size_t num_extruders, std::vector<int>& variant_index);
 
@@ -585,7 +628,7 @@ private:
 
     std::unordered_map<int, std::unordered_map<int,double>> calc_estimated_filament_print_time() const;
 
-    void slice_volumes();
+    void slice_volumes(long long *region_split_ms_out = nullptr, long long *mm_segment_ms_out = nullptr);
     void apply_conical_overhang();
     //BBS
     ExPolygons _shrink_contour_holes(double contour_delta, double hole_delta, const ExPolygons& polys) const;
@@ -604,6 +647,12 @@ private:
     void discover_horizontal_shells();
     void merge_infill_types();
     void combine_infill();
+    void discover_sub_top_surfaces();
+    // BBS multi-diameter adaptive layer height:
+    // decide which layers each wall region keeps before walls are generated.
+    void compute_adaptive_merge_groups();
+    // merge sparse/solid internal fill using the same bands as walls when possible.
+    void combine_adaptive_infill();
     void _generate_support_material();
     std::pair<FillAdaptive::OctreePtr, FillAdaptive::OctreePtr> prepare_adaptive_infill_data(
         const std::vector<std::pair<const Surface*, float>>& surfaces_w_bottom_z) const;
@@ -611,6 +660,11 @@ private:
 
     // BBS
     SupportNecessaryType is_support_necessary();
+    // Warn about overhangs the tree support generator meant to cover but produced nothing for.
+    void                 warn_uncovered_overhangs();
+    // Union of what the support generator actually produced on one support layer, restricted to the
+    // parts overlapping roi.
+    ExPolygons           collected_support_areas(const SupportLayer *support_layer, const BoundingBox &roi) const;
     void                 merge_layer_node(const size_t layer_id, int &max_merged_id, std::map<int, std::vector<std::pair<int, int>>> &node_record);
     // XYZ in scaled coordinates
     Vec3crd									m_size;
@@ -632,6 +686,7 @@ private:
     SlicingParameters                       m_slicing_params;
     LayerPtrs                               m_layers;
     SupportLayerPtrs                        m_support_layers;
+    SupportStageTimes                       m_support_stage_times;
     // BBS
     std::shared_ptr<TreeSupportData>        m_tree_support_preview_cache;
 
@@ -891,14 +946,43 @@ public:
     }
 
     // Returns an empty string if valid, otherwise returns an error message.
-    StringObjectException validate(StringObjectException *warning = nullptr, Polygons* collison_polygons = nullptr, std::vector<std::pair<Polygon, float>>* height_polygons = nullptr) const override;
+    StringObjectException validate(std::vector<StringObjectException> *warnings = nullptr, Polygons* collison_polygons = nullptr, std::vector<std::pair<Polygon, float>>* height_polygons = nullptr) const override;
     double              skirt_first_layer_height() const;
     Flow                brim_flow() const;
+    // Brim flow of one object. In multi-diameter prints it follows the 1-based physical filament printing the
+    // brim (mixed slots already resolved) and the merged height of the brim layer, otherwise it equals brim_flow().
+    Flow                multi_diameter_brim_flow(const PrintObject &object, unsigned int filament_id) const;
+    // Support brim flow of one object. In multi-diameter prints it follows the nozzle and merged height of the
+    // first support layer the object extrudes on the bed, otherwise it equals brim_flow().
+    Flow                multi_diameter_support_brim_flow(const PrintObject &object) const;
+    // The no-argument overload returns the widest flow needed by any used filament for shared skirt geometry.
+    // Explicit filament IDs are 1-based and resolve per-filament nozzle selections.
     Flow                skirt_flow() const;
+    Flow                skirt_flow(unsigned int filament_id) const;
+    Flow                skirt_flow(const PrintObject &object, unsigned int filament_id) const;
+    // skirt_flow(object, filament_id) with the height of the object's brim layer in multi-diameter prints,
+    // where the per-object skirt is laid with the brim. Otherwise it equals skirt_flow(object, filament_id).
+    Flow                multi_diameter_skirt_flow_on_brim_layer(const PrintObject &object, unsigned int filament_id) const;
 
     std::vector<unsigned int> object_extruders() const;
     std::vector<unsigned int> support_material_extruders() const;
     std::vector<unsigned int> extruders(bool conside_custom_gcode = false) const;
+    // BBS multi-diameter: 0-based filaments the plate actually prints with. Like extruders(true), but takes only
+    // the custom tool changes that ToolOrdering applies (MultiAsSingle, single object filament) and that sit
+    // within the printed height. Reads the model's paint, so not to be called from the parallel slicing steps.
+    // For the single-diameter layering decision and the tool-change structure planning.
+    std::vector<unsigned int> printed_filaments() const;
+    // BBS multi-diameter: whether this print needs the adaptive diameter ladder. This includes either
+    // multiple used diameters or one used coarse diameter above the process grid's primary nozzle.
+    // Single fact behind model, support and wipe-tower merging keeps their Z ladders aligned.
+    // A plate using a single diameter is sliced straight at that nozzle's band height instead (see
+    // single_diameter_layering_nozzle()), so it never needs the ladder.
+    bool                uses_multiple_nozzle_diameters() const;
+    // BBS multi-diameter: the nozzle diameter a multi-diameter plate is sliced for when everything on it
+    // prints with that one diameter, 0 otherwise. Such a plate is sliced at the height the nozzle's merged
+    // band would have, rather than on the fine grid and merged back afterwards. Resolved in apply(), before
+    // the objects' slicing parameters.
+    double              single_diameter_layering_nozzle() const { return m_single_diameter_layering_nozzle; }
     double              max_allowed_layer_height() const;
     bool                has_support_material() const;
     // Make sure the background processing has no access to this model_object during this call!
@@ -907,7 +991,7 @@ public:
     const PrintConfig&          config() const { return m_config; }
     const PrintObjectConfig&    default_object_config() const { return m_default_object_config; }
     const PrintRegionConfig&    default_region_config() const { return m_default_region_config; }
-    
+
     ConstPrintObjectPtrsAdaptor objects() const { return ConstPrintObjectPtrsAdaptor(&m_objects); }
     const PrintObject*          get_object(size_t idx) const { return m_objects[idx]; }
     PrintObject*                get_object(size_t idx) { return const_cast<PrintObject*>(m_objects[idx]); }
@@ -950,7 +1034,7 @@ public:
     bool                        support_material_on_wipe_tower() const;
     const WipeTowerData&        wipe_tower_data(size_t filaments_cnt = 0) const;
     const ToolOrdering& 		tool_ordering() const { return m_tool_ordering; }
-    
+
     // Sequential print support.
     bool                        is_sequential_print() const {
         return config().print_sequence == PrintSequence::ByObject && m_objects.size() > 1;
@@ -963,6 +1047,10 @@ public:
 
     void update_filament_maps_to_config(std::vector<int> f_maps, std::vector<int> f_volume_maps = std::vector<int>{}, std::vector<int> f_nozzle_maps = std::vector<int>{});
     void update_to_config_by_nozzle_group_result(const MultiNozzleUtils::NozzleGroupResultBase& result);
+    // fmmNozzleManual（仅 H2C）：命令行以旧“分组 key”传入 filament_nozzle_map。在整盘全集上把它解析成
+    // 后端使用的 nozzle_list 下标并写回 config。幂等（已是合法下标则保持不变），但必须传整盘全集、
+    // 不能传单层子集。无法解析时抛异常。
+    void resolve_manual_nozzle_map(const std::vector<unsigned int>& used_filaments);
     void apply_config_for_render(const DynamicConfig &config);
 
     // 1 based group ids
@@ -983,6 +1071,9 @@ public:
 
     const std::vector<std::vector<DynamicPrintConfig>>& get_extruder_filament_info() const { return m_extruder_filament_info; }
     void set_extruder_filament_info(const std::vector<std::vector<DynamicPrintConfig>>& filament_info) { m_extruder_filament_info = filament_info; }
+
+    const std::vector<FilamentGroupUtils::NozzleLoadedFilamentInfo> &get_nozzle_loaded_filament_info() const { return m_nozzle_loaded_filament_info; }
+    void set_nozzle_loaded_filament_info(const std::vector<FilamentGroupUtils::NozzleLoadedFilamentInfo> &filament_info);
 
     void set_geometric_unprintable_filaments(const std::vector<std::set<int>> &unprintables_filament_ids) { m_geometric_unprintable_filaments = unprintables_filament_ids; }
     std::vector<std::set<int>> get_geometric_unprintable_filaments() const { return m_geometric_unprintable_filaments;}
@@ -1008,6 +1099,12 @@ public:
         m_slice_used_mixed_filaments = used_mixed_filaments;
     }
     const std::vector<unsigned int>& get_slice_used_mixed_filaments() const { return m_slice_used_mixed_filaments; }
+
+    // 0-based physical filament slots used directly on this plate (not only as mixed components).
+    void set_slice_directly_used_filaments(const std::vector<unsigned int> &directly_used_filaments) {
+        m_slice_directly_used_filaments = directly_used_filaments;
+    }
+    const std::vector<unsigned int> &get_slice_directly_used_filaments() const { return m_slice_directly_used_filaments; }
 
     /**
     * @brief Determines the unprintable filaments for each extruder based on its physical attributes
@@ -1076,9 +1173,6 @@ public:
     BoundingBoxf        get_wipe_tower_bbx() const { return m_wipe_tower_data.bbx; }
     Vec2f               get_rib_offset() const { return m_wipe_tower_data.rib_offset; }
     const FakeWipeTower& get_fake_wipe_tower() const { return m_fake_wipe_tower; }
-
-    void set_check_multi_filaments_compatibility(bool check) { m_need_check_multi_filaments_compatibility = check; }
-    bool need_check_multi_filaments_compatibility() const { return m_need_check_multi_filaments_compatibility; }
 
     // scaled point
     Vec2d translate_to_print_space(const Point& point) const;
@@ -1162,8 +1256,9 @@ protected:
     bool                invalidate_step(PrintStep step);
 
 private:
-    //BBS
-    static StringObjectException check_multi_filament_valid(const Print &print);
+    // BBS multi-diameter: value for m_single_diameter_layering_nozzle from the filaments the plate uses.
+    // Reads the model's paint, so only to be called from apply().
+    double              resolve_single_diameter_layering_nozzle() const;
 
     bool                has_tpu_filament() const;
     bool                invalidate_state_by_config_options(const ConfigOptionResolver &new_config, const std::vector<t_config_option_key> &opt_keys);
@@ -1185,7 +1280,7 @@ private:
     PrintRegionPtrs                         m_print_regions;
     //BBS.
     bool m_isBBLPrinter = false;
-    
+
     // Ordered collections of extrusion paths to build skirt loops and brim.
     ExtrusionEntityCollection               m_skirt;
     // BBS: collecting extrusion paths to build brim by objs
@@ -1200,11 +1295,12 @@ private:
     Points                                  m_skirt_convex_hull;
 
     std::vector<std::vector<DynamicPrintConfig>> m_extruder_filament_info;
+    std::vector<FilamentGroupUtils::NozzleLoadedFilamentInfo> m_nozzle_loaded_filament_info;
 
     // Following section will be consumed by the GCodeGenerator.
     ToolOrdering 							m_tool_ordering;
     WipeTowerData                           m_wipe_tower_data {m_tool_ordering};
-    
+
     std::optional<ByObjectPrintData>        m_sequential_print_data;
 
     // Estimated print time, filament consumed.
@@ -1213,6 +1309,9 @@ private:
     StatisticsByExtruderCount               m_statistics_by_extruder_count;
 
     std::shared_ptr<MultiNozzleUtils::NozzleGroupResultBase> m_nozzle_group_result;
+
+    // BBS multi-diameter: see single_diameter_layering_nozzle().
+    double                                  m_single_diameter_layering_nozzle { 0. };
 
     // Used to cache filament parameter information
     FilamentIndexMap m_filament_index_map;
@@ -1224,6 +1323,7 @@ private:
     std::vector<unsigned int> m_slice_used_filaments;
     std::vector<unsigned int> m_slice_used_filaments_first_layer;
     std::vector<unsigned int> m_slice_used_mixed_filaments;
+    std::vector<unsigned int> m_slice_directly_used_filaments;
 
     //BBS: plate's origin
     Vec3d   m_origin;
@@ -1235,14 +1335,13 @@ private:
     bool              m_has_auto_filament_map_result{false};
 
     std::set<PrintObject*> m_reslicing_objects;
+    std::unordered_map<std::string, long long>* m_slice_time {nullptr};
 
     std::vector<std::set<int>> m_geometric_unprintable_filaments;
     std::unordered_map<int, std::unordered_map<int, double>> m_filament_print_time;
 
     // OrcaSlicer: calibration
     Calib_Params m_calib_params;
-
-    bool m_need_check_multi_filaments_compatibility{true};
 
     // To allow GCode to set the Print's GCodeExport step status.
     friend class GCode;
@@ -1337,6 +1436,14 @@ Polygons compacted_wipe_tower_rings(const CompactedTowerZone &zone, bool any_bod
 // being unusable on screen, where drawn flat it hides under the object and drawn at the height limit
 // it ends up buried inside the mesh.
 Polygon compacted_wipe_tower_offender_outline(const Polygon &inst_hull, double body_clearance);
+
+// Whether the plater has to show the rod / lid reference lines for this print. A compacted prime tower
+// drags the nozzle back down to the plate on every toolchange, so the rod and the lid limit how tall a
+// neighbouring object may be exactly as they do in sequential printing. Every caller that reacts to the
+// lines existing must ask this one question: besides drawing them, the camera has to grow its scene
+// bounding box up to extruder_clearance_height_to_lid, otherwise the tight near plane
+// (Camera::calc_tight_frustrum_zs_around) clips away the part of the box closest to the viewer.
+bool should_show_height_limit_lines(const Print &print);
 
 } /* slic3r_Print_hpp_ */
 

@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "upstream_repository": "bambulab/BambuStudio",
-  "upstream_tag": "v02.08.02.61",
-  "upstream_version": "02.08.02.61",
-  "upstream_commit": "926a7192574bcb9b3a732e1ec59a46d79cb45466",
-  "fork_revision": 7,
-  "fork_version": "02.08.02.61-ecore.7",
+  "upstream_tag": "v02.09.01.70",
+  "upstream_version": "02.09.01.70",
+  "upstream_commit": "56a57d00a591360cf41bf21383915ee5bf357be5",
+  "fork_revision": 1,
+  "fork_version": "02.09.01.70-ecore.1",
   "release_repository": "WDGame/BambuStudio",
   "release_channel": "stable",
   "features": [

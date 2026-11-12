@@ -5,9 +5,13 @@
 #include <wx/colour.h>
 #include <wx/dc.h>
 #include <wx/gdicmn.h>
+#include <string>
 #include <vector>
 
 namespace Slic3r { namespace GUI {
+
+// "RRGGBB" / "#RRGGBB" -> wxColour. Falls back to grey (0x636363) on empty / invalid.
+wxColour parse_hex_color(const std::string& hex);
 
 // Fills a rect with a west->east linear gradient by drawing solid 1px columns.
 // Use instead of wxDC::GradientFillLinear, whose CoreGraphics (CGShading) backend
@@ -31,6 +35,10 @@ wxBitmap create_filament_bitmap(const std::vector<wxColour>& colors,
 void get_translucent_checker_colors(const wxColour& color, wxColour& light_out, wxColour& dark_out);
 
 wxBitmap create_translucent_circle_bitmap(const wxColour& color, int diameter, int border_width = 1);
+
+// Rescale an existing bitmap (e.g. a fixed-size icon asset) to an exact square diameter,
+// so it can be drawn to line up with a circle of that diameter.
+wxBitmap scale_bitmap_to_diameter(const wxBitmap& src, int diameter);
 
 wxBitmap create_translucent_round_rect_bitmap(const wxColour& color, const wxSize& size, double radius);
 
