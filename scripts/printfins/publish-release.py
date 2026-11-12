@@ -34,6 +34,18 @@ def validate_assets(directory, tag, commit):
     return files
 
 
+def release_assets(repo, tag):
+    # Draft releases are not returned by the REST get-by-tag endpoint.
+    release = json.loads(run("gh", "release", "view", tag, "--repo", repo,
+                             "--json", "databaseId,tagName").stdout)
+    if release["tagName"] != tag:
+        raise ValueError("Release lookup returned another tag")
+    result = json.loads(run("gh", "api", f"repos/{repo}/releases/{release['databaseId']}").stdout)
+    if result["tag_name"] != tag:
+        raise ValueError("Release identity changed during verification")
+    return result["assets"]
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     tag = os.environ["RELEASE_TAG"]
@@ -63,7 +75,7 @@ def main():
         return
     run("gh", "release", "upload", tag, *(str(f) for f in files), "--repo", repo, "--clobber")
     # Verify uploaded bytes using the server's digests before exposing latest.json.
-    assets = json.loads(run("gh", "api", f"repos/{repo}/releases/tags/{tag}").stdout)["assets"]
+    assets = release_assets(repo, tag)
     for file in files:
         asset = next(a for a in assets if a["name"] == file.name)
         with file.open("rb") as stream:
