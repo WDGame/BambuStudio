@@ -22,6 +22,20 @@ def api(path, method=None, **fields):
     return json.loads(run(*args))
 
 
+def merged_commit(repo, number, pr, expected):
+    sha = pr.get("merge_commit_sha")
+    if not sha:
+        # REST 2026-03-10 omits merge_commit_sha; GraphQL retains mergeCommit.
+        state = json.loads(run("gh", "pr", "view", number, "--repo", repo,
+                               "--json", "state,headRefOid,mergeCommit"))
+        if state["state"] != "MERGED" or state["headRefOid"] != expected:
+            raise RuntimeError("PR merge identity differs from the tested candidate")
+        sha = (state.get("mergeCommit") or {}).get("oid", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("Merged commit could not be verified")
+    return sha
+
+
 def validate_metadata(root):
     state = json.loads((root / "printfins-fork.json").read_text())
     version = state["upstream_version"]
@@ -83,7 +97,7 @@ def main():
         if not pr["merged"] or pr["head"]["sha"] != expected:
             raise RuntimeError("PR merge was not verified")
         current = api(f"repos/{repo}/git/ref/heads/integration")["object"]["sha"]
-        if current != pr["merge_commit_sha"]:
+        if current != merged_commit(repo, pr_number, pr, expected):
             raise RuntimeError("Integration moved after candidate promotion; refusing a stale release")
         merged = api(f"repos/{repo}/git/commits/{current}")
         if merged["tree"]["sha"] != run("git", "rev-parse", "HEAD^{tree}"):

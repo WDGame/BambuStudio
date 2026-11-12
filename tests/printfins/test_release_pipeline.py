@@ -87,6 +87,22 @@ class ReleasePipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Integration changed'):
                 PROMOTE.main()
 
+    def test_merged_commit_uses_graphql_when_new_rest_omits_field(self):
+        expected, merged = 'a' * 40, 'b' * 40
+        with patch.object(PROMOTE, 'run', return_value=json.dumps({
+                'state': 'MERGED', 'headRefOid': expected, 'mergeCommit': {'oid': merged}})):
+            self.assertEqual(PROMOTE.merged_commit('owner/repo', '1', {'merged': True}, expected), merged)
+
+    def test_merged_commit_rejects_changed_head_or_missing_merge_identity(self):
+        expected = 'a' * 40
+        for state in [
+                {'state': 'MERGED', 'headRefOid': 'c' * 40, 'mergeCommit': {'oid': 'b' * 40}},
+                {'state': 'OPEN', 'headRefOid': expected, 'mergeCommit': {'oid': 'b' * 40}},
+                {'state': 'MERGED', 'headRefOid': expected, 'mergeCommit': None}]:
+            with self.subTest(state=state), patch.object(PROMOTE, 'run', return_value=json.dumps(state)):
+                with self.assertRaises(RuntimeError):
+                    PROMOTE.merged_commit('owner/repo', '1', {'merged': True}, expected)
+
     def test_assets_are_verified_before_upload_and_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
