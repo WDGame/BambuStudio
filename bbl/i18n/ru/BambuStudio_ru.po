@@ -23299,3 +23299,12 @@ msgstr "Обновление отменено: приложению не уда�
 
 msgid "Update cancelled"
 msgstr "Обновление отменено"
+
+msgid "Preparing update"
+msgstr "Подготовка обновления"
+
+msgid "Checking the downloaded installer..."
+msgstr "Проверка уже загруженного установщика..."
+
+msgid "The update installer is ready and verified. Bambu Studio E-Core will close, install the update, and start again. Save any work before continuing."
+msgstr "Установщик обновления готов и проверен. Bambu Studio E-Core закроется, установит обновление и запустится снова. Перед продолжением сохрани работу."

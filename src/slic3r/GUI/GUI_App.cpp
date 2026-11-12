@@ -6417,74 +6417,92 @@ void GUI_App::download_and_install_update()
         ("BambuStudio-ECore-" + version_info.version_str + "-Setup.exe");
     const boost::filesystem::path partial(target.string() + ".download");
     boost::system::error_code ec;
-    boost::filesystem::remove(partial, ec);
-
-    wxProgressDialog progress(_L("Downloading update"), _L("Downloading the verified E-Core installer..."),
+    // A failed/cancelled installation leaves the versioned EXE in the temp
+    // directory. Never trust its name alone: validate it against the current
+    // release manifest before deciding to skip the download.
+    wxProgressDialog progress(_L("Preparing update"), _L("Checking the downloaded installer..."),
         100, mainframe, wxPD_APP_MODAL | wxPD_CAN_ABORT | wxPD_AUTO_HIDE | wxPD_ELAPSED_TIME | wxPD_REMAINING_TIME);
-    bool completed = false;
-    bool failed = false;
-    bool cancelled = false;
-    std::string failure;
-    try {
-        Slic3r::Http http = Slic3r::Http::get(version_info.installer_url);
-        http.header("accept", "application/octet-stream")
-            .timeout_connect(TIMEOUT_CONNECT)
-            .timeout_max(0)
-            .size_limit(version_info.installer_size + 1024 * 1024)
-            .to_file(partial)
-            .on_progress([&](Slic3r::Http::Progress state, bool &cancel) {
-                const size_t total = state.dltotal ? state.dltotal : version_info.installer_size;
-                const int percent = total ? static_cast<int>(std::min<size_t>(99, state.dlnow * 100 / total)) : 0;
-                if (!progress.Update(percent)) {
-                    cancelled = true;
-                    cancel = true;
-                }
-            })
-            .on_complete([&](std::string, unsigned) { completed = true; })
-            .on_error([&](std::string, std::string error, unsigned status) {
-                failed = true;
-                failure = error.empty() ? "HTTP " + std::to_string(status) : error;
-            })
-            .perform_sync();
-    } catch (const std::exception &error) {
-        failed = true;
-        failure = error.what();
-    }
+    if (!progress.Update(0))
+        return;
+    std::string cached_sha256;
+    const bool reuse_installer = boost::filesystem::is_regular_file(target, ec) && !ec &&
+        boost::filesystem::file_size(target, ec) == version_info.installer_size && !ec &&
+        sha256_file(target, cached_sha256) && cached_sha256 == version_info.installer_sha256;
+    if (!progress.Update(0))
+        return;
 
-    if (cancelled || failed || !completed) {
+    if (!reuse_installer) {
         boost::filesystem::remove(partial, ec);
-        if (!cancelled)
-            MessageDialog(mainframe, _L("The update could not be downloaded.") + "\n\n" + wxString::FromUTF8(failure),
+        progress.SetTitle(_L("Downloading update"));
+        if (!progress.Update(0, _L("Downloading the verified E-Core installer...")))
+            return;
+        bool completed = false;
+        bool failed = false;
+        bool cancelled = false;
+        std::string failure;
+        try {
+            Slic3r::Http http = Slic3r::Http::get(version_info.installer_url);
+            http.header("accept", "application/octet-stream")
+                .timeout_connect(TIMEOUT_CONNECT)
+                .timeout_max(0)
+                .size_limit(version_info.installer_size + 1024 * 1024)
+                .to_file(partial)
+                .on_progress([&](Slic3r::Http::Progress state, bool &cancel) {
+                    const size_t total = state.dltotal ? state.dltotal : version_info.installer_size;
+                    const int percent = total ? static_cast<int>(std::min<size_t>(99, state.dlnow * 100 / total)) : 0;
+                    if (!progress.Update(percent)) {
+                        cancelled = true;
+                        cancel = true;
+                    }
+                })
+                .on_complete([&](std::string, unsigned) { completed = true; })
+                .on_error([&](std::string, std::string error, unsigned status) {
+                    failed = true;
+                    failure = error.empty() ? "HTTP " + std::to_string(status) : error;
+                })
+                .perform_sync();
+        } catch (const std::exception &error) {
+            failed = true;
+            failure = error.what();
+        }
+
+        if (cancelled || failed || !completed) {
+            boost::filesystem::remove(partial, ec);
+            if (!cancelled)
+                MessageDialog(mainframe, _L("The update could not be downloaded.") + "\n\n" + wxString::FromUTF8(failure),
+                    _L("Update failed"), wxOK | wxICON_ERROR).ShowModal();
+            return;
+        }
+
+        if (boost::filesystem::file_size(partial, ec) != version_info.installer_size || ec) {
+            boost::filesystem::remove(partial, ec);
+            MessageDialog(mainframe, _L("The downloaded installer has an unexpected size and was deleted."),
+                _L("Update verification failed"), wxOK | wxICON_ERROR).ShowModal();
+            return;
+        }
+
+        std::string actual_sha256;
+        if (!sha256_file(partial, actual_sha256) || actual_sha256 != version_info.installer_sha256) {
+            boost::filesystem::remove(partial, ec);
+            MessageDialog(mainframe, _L("The downloaded installer failed SHA-256 verification and was deleted."),
+                _L("Update verification failed"), wxOK | wxICON_ERROR).ShowModal();
+            return;
+        }
+
+        boost::filesystem::remove(target, ec);
+        boost::filesystem::rename(partial, target, ec);
+        if (ec) {
+            MessageDialog(mainframe, _L("The verified installer could not be prepared for launch."),
                 _L("Update failed"), wxOK | wxICON_ERROR).ShowModal();
-        return;
-    }
-
-    if (boost::filesystem::file_size(partial, ec) != version_info.installer_size || ec) {
-        boost::filesystem::remove(partial, ec);
-        MessageDialog(mainframe, _L("The downloaded installer has an unexpected size and was deleted."),
-            _L("Update verification failed"), wxOK | wxICON_ERROR).ShowModal();
-        return;
-    }
-
-    std::string actual_sha256;
-    if (!sha256_file(partial, actual_sha256) || actual_sha256 != version_info.installer_sha256) {
-        boost::filesystem::remove(partial, ec);
-        MessageDialog(mainframe, _L("The downloaded installer failed SHA-256 verification and was deleted."),
-            _L("Update verification failed"), wxOK | wxICON_ERROR).ShowModal();
-        return;
-    }
-
-    boost::filesystem::remove(target, ec);
-    boost::filesystem::rename(partial, target, ec);
-    if (ec) {
-        MessageDialog(mainframe, _L("The verified installer could not be prepared for launch."),
-            _L("Update failed"), wxOK | wxICON_ERROR).ShowModal();
-        return;
+            return;
+        }
+    } else {
+        BOOST_LOG_TRIVIAL(info) << "E-Core updater: reusing verified installer for " << version_info.version_str;
     }
     progress.Update(100);
 
     MessageDialog confirmation(mainframe,
-        _L("The update was downloaded and verified. Bambu Studio E-Core will close, install the update, and start again. Save any work before continuing."),
+        _L("The update installer is ready and verified. Bambu Studio E-Core will close, install the update, and start again. Save any work before continuing."),
         _L("Install update"), wxYES_NO | wxNO_DEFAULT | wxICON_INFORMATION);
     if (confirmation.ShowModal() != wxID_YES)
         return;
