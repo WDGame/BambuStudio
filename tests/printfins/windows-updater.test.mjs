@@ -68,3 +68,41 @@ test('fork metadata and compiled updater version agree', () => {
     assert.ok(version.includes(`display = "${state.fork_version}";`));
     assert.ok(read('version.inc').includes(`"${state.upstream_version}"`));
 });
+
+test('a cached installer skips the download only after size and SHA-256 verification', () => {
+    const source = read('src/slic3r/GUI/GUI_App.cpp');
+    const update = source.slice(source.indexOf('void GUI_App::download_and_install_update()'),
+        source.indexOf('void GUI_App::check_beta_version('));
+    assert.match(update, /temp_directory_path\(\)[\s\S]*version_info\.version_str \+ "-Setup\.exe"/);
+    assert.match(update, /const bool reuse_installer = boost::filesystem::is_regular_file\(target, ec\) && !ec &&\s*boost::filesystem::file_size\(target, ec\) == version_info\.installer_size && !ec &&\s*sha256_file\(target, cached_sha256\) && cached_sha256 == version_info\.installer_sha256;/);
+
+    // Check the whole cache-miss block (including nested callbacks), not just
+    // the relative positions of an if statement and the HTTP call.
+    const guard = update.indexOf('if (!reuse_installer) {');
+    assert.ok(guard > update.indexOf('const bool reuse_installer'));
+    let cursor = update.indexOf('{', guard) + 1;
+    const begin = cursor;
+    let depth = 1;
+    while (cursor < update.length && depth) {
+        if (update[cursor] === '{') ++depth;
+        if (update[cursor] === '}') --depth;
+        ++cursor;
+    }
+    assert.equal(depth, 0);
+    const download = update.slice(begin, cursor - 1);
+    assert.match(download, /Http::get\(version_info\.installer_url\)/);
+    assert.match(download, /sha256_file\(partial, actual_sha256\)/);
+    assert.match(download, /rename\(partial, target, ec\)/);
+    const remainder = update.slice(0, guard) + update.slice(cursor);
+    assert.doesNotMatch(remainder, /Http::get|remove\(target|rename\(partial/);
+    assert.match(update.slice(cursor), /launch_detached_update_helper\(target/);
+});
+
+test('installer errors retain the verified EXE for a later retry', () => {
+    const source = read('src/slic3r/GUI/GUI_App.cpp');
+    const literals = source.slice(source.indexOf('    script <<'), source.indexOf('    script.close();'));
+    const helper = [...literals.matchAll(/"(?:\\.|[^"\\])*"/g)].map(match => JSON.parse(match[0])).join('');
+    assert.match(helper, /if \(\$installer\.ExitCode -ne 0\) \{ throw [^\n]+\n  Remove-Item -LiteralPath \$InstallerPath/);
+    const finallyBlock = helper.slice(helper.indexOf('} finally {'));
+    assert.doesNotMatch(finallyBlock, /Remove-Item -LiteralPath \$InstallerPath/);
+});

@@ -4,8 +4,8 @@
 namespace Slic3r::GUI::ForkVersion {
 inline constexpr const char *repository = "WDGame/BambuStudio";
 inline constexpr const char *upstream_version = "02.09.01.70";
-inline constexpr int revision = 1;
-inline constexpr const char *display = "02.09.01.70-ecore.1";
+inline constexpr int revision = 2;
+inline constexpr const char *display = "02.09.01.70-ecore.2";
 }
 
 #endif

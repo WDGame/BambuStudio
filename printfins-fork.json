@@ -4,8 +4,8 @@
   "upstream_tag": "v02.09.01.70",
   "upstream_version": "02.09.01.70",
   "upstream_commit": "56a57d00a591360cf41bf21383915ee5bf357be5",
-  "fork_revision": 1,
-  "fork_version": "02.09.01.70-ecore.1",
+  "fork_revision": 2,
+  "fork_version": "02.09.01.70-ecore.2",
   "release_repository": "WDGame/BambuStudio",
   "release_channel": "stable",
   "features": [
